@@ -17,8 +17,15 @@
             border-bottom: 1px solid #333;
             padding-bottom: 10px;
             display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .header-top {
+            display: flex;
             justify-content: space-between;
             align-items: center;
+            width: 100%;
         }
         .controls {
             display: flex;
@@ -81,6 +88,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            white-space: nowrap;
         }
         .arrow {
             font-size: 16px;
@@ -146,6 +154,9 @@
             font-size: 14px;
             color: #a0a0a0;
             margin: 0 10px;
+            display: inline-block;
+            min-width: 170px;
+            text-align: center;
         }
     </style>
 </head>
@@ -156,16 +167,46 @@
     </div>
 
     <h1>
-        <span>HytaleGenerator Performance Report Visualizer <span id="status" style="font-size: 12px; font-weight: normal; color: #888; margin-left: 10px;">Drag & Drop a log file anywhere</span></span>
-        <div class="controls">
-            <button id="btnPrev" disabled>&laquo; Older</button>
-            <span id="historyIndicator">No Data</span>
-            <button id="btnNext" disabled>Newer &raquo;</button>
-            <button id="btnLatest" disabled>Live / Latest</button>
-            <button onclick="document.getElementById('fileInput').click()">Select File</button>
-            <input type="file" id="fileInput" accept=".txt,.log" />
+        <div class="header-top">
+            <span>HytaleGenerator Performance Report Visualizer</span>
+            <div class="controls">
+                <a href="https://hytalemodding.dev/13-docs/12-game-mechanics/02-worldgen/03-world-generation-performance.html" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Optimization Docs ↗</a>
+                <button onclick="document.getElementById('tipsDialog').showModal()" style="background-color: #4cca88; color: #1e1e1e; font-weight: bold; border-radius: 50%; width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; margin-right: 15px;" title="Performance Tips">?</button>
+                <label style="font-size: 14px; display: flex; align-items: center; gap: 5px; cursor: pointer; margin-right: 10px;" title="Only show reports with >= X Sample Count">
+                    <input type="checkbox" id="chkMinSamples" onchange="filterReports()"> &gt;= <input type="number" id="minSamplesValue" value="500" min="0" step="50" style="width: 50px; background: #252526; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 2px 4px;" onclick="event.stopPropagation()" onchange="if(document.getElementById('chkMinSamples').checked) filterReports()" onkeyup="if(document.getElementById('chkMinSamples').checked) filterReports()"> Samples
+                </label>
+                <button id="btnPrev" disabled>&laquo; Older</button>
+                <span id="historyIndicator">No Data</span>
+                <button id="btnNext" disabled>Newer &raquo;</button>
+                <button id="btnLatest" disabled>Live / Latest</button>
+                <button onclick="document.getElementById('fileInput').click()">Select File</button>
+                <input type="file" id="fileInput" accept=".txt,.log" />
+            </div>
         </div>
+        <div id="status" style="font-size: 14px; font-weight: normal; color: #888;">Drag & Drop a log file anywhere</div>
     </h1>
+
+    <dialog id="tipsDialog" style="background: #252526; color: #d4d4d4; border: 1px solid #4cca88; border-radius: 8px; max-width: 810px; padding: 20px;">
+        <h2 style="color: #4cca88; margin-top: 0;">Optimization Tips</h2>
+        <ul style="font-size: 14px; line-height: 1.6;">
+            <li><b>Use 2D over 3D:</b> Try to use 2D where possible. 3D domain warping tends to invalidate 2D caches.</li>
+            <li><b>Caching:</b> Put Cache nodes on the right side of all YOverride nodes.</li>
+            <li><b>Transition Distances:</b> In WorldStructure, don't use DefaultTransitionDistance and MaxBiomeEdgeDistance values greater than necessary.</li>
+            <li><b>Mixers:</b> Use Mix at the root of Biomes to replace area above max height with Constant Density -1, and underground with 1.</li>
+            <li><b>Sampling:</b> Try to use YSampled (distance 8) where possible to reduce vertical calculations.</li>
+            <li><b>Runtimes:</b> Reduce distinct Runtime indices across all Biomes. Structure Biomes to fit as many Props as possible within the same Runtime.</li>
+            <li><b>Prop Sizes:</b> Reduce the size of the horizontally largest Prop. Put large Props at the lowest Runtime index.</li>
+            <li><b>Materials:</b> Inside Material Providers, use the Terrain Density node to calculate terrain gradient (much faster than importing root Density).</li>
+        </ul>
+        <button onclick="document.getElementById('tipsDialog').close()" style="float: right;">Close</button>
+    </dialog>
+
+    <div id="emptyState" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 60vh; color: #666; border: 2px dashed #444; border-radius: 10px; margin-top: 20px; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.borderColor='#666'; this.style.color='#888'" onmouseout="this.style.borderColor='#444'; this.style.color='#666'" onclick="document.getElementById('fileInput').click()">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 20px;"><path d="M21.2 15c.7-1.2 1-2.5 .7-3.9-.6-2-2.4-3.5-4.4-3.5h-1.2c-.7-3-3.2-5.2-6.2-5.6-3-.3-5.9 1.3-7.3 4-1.2 2.5-1 6.5.5 8.8m8.7-1.6V21"/><path d="M16 16l-4-4-4 4"/></svg>
+        <span id="emptyStateError" style="color: #f14c4c; font-size: 14px; margin-bottom: 10px; display: none;"></span>
+        <h2 style="margin: 0;">Drag & Drop a world generation log</h2>
+        <p style="margin-top: 10px;">or click here to browse files</p>
+    </div>
     
     <div id="visualizerContainer" style="display: none;">
         
@@ -182,7 +223,7 @@
 
         <div class="container">
             <div class="card" id="card-general">
-                <h2>General</h2>
+                <h2 style="display: flex; justify-content: space-between; align-items: center;">General <button onclick="copyGeneralInfo(this)" style="padding: 2px 6px; font-size: 11px; cursor: pointer;">Copy</button></h2>
                 <div class="stat-list"></div>
             </div>
             <div class="card" id="card-stages">
@@ -214,6 +255,33 @@
         const NOISE_TOLERANCE_MB = 1.0;
         const NOISE_TOLERANCE_PERCENT = 0.1;
 
+        function copyGeneralInfo(btn) {
+            if (viewIndex < 0 || viewIndex >= allReports.length) return;
+            const latest = allReports[viewIndex].general;
+            
+            let textToCopy = "";
+            for (const [key, value] of Object.entries(latest)) {
+                if (key === 'Total Time' || key === 'Content Generation' || key === 'Data Transfer') {
+                    textToCopy += `${key}: ${value} ms\n`;
+                } else {
+                    textToCopy += `${key}: ${value}\n`;
+                }
+            }
+
+            navigator.clipboard.writeText(textToCopy.trim()).then(() => {
+                const oldText = btn.innerText;
+                const oldColor = btn.style.backgroundColor;
+                btn.innerText = "Copied!";
+                btn.style.backgroundColor = "#4cca88";
+                setTimeout(() => {
+                    btn.innerText = oldText;
+                    btn.style.backgroundColor = oldColor;
+                }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy!', err);
+            });
+        }
+
         // UI Elements
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
@@ -226,6 +294,7 @@
             if (e.target.files.length > 0) {
                 handleStaticFile(e.target.files[0]);
             }
+            e.target.value = ''; // Reset input to allow selecting the same file again
         });
 
         // Global Drag and drop logic
@@ -272,7 +341,9 @@
         function handleStaticFile(file) {
             fileHandle = null;
             staticFile = file; 
+            lastModified = 0; // Reset to force re-reading the entire new file
             document.getElementById('status').innerText = `Viewing ${file.name}`;
+            document.getElementById('emptyState').style.display = 'none';
             document.getElementById('visualizerContainer').style.display = 'block';
             startPolling();
         }
@@ -280,7 +351,9 @@
         function startLiveTracking(handle) {
             fileHandle = handle;
             staticFile = null;
+            lastModified = 0; // Reset to force re-reading the entire new file
             document.getElementById('status').innerText = `Tracking ${handle.name} live...`;
+            document.getElementById('emptyState').style.display = 'none';
             document.getElementById('visualizerContainer').style.display = 'block';
             startPolling();
         }
@@ -291,7 +364,22 @@
             pollInterval = setInterval(checkFile, 2000);
         }
 
-        async function checkFile() {
+        function showError(msg) {
+            document.getElementById('emptyState').style.display = 'flex';
+            document.getElementById('visualizerContainer').style.display = 'none';
+            const errEl = document.getElementById('emptyStateError');
+            errEl.innerText = msg;
+            errEl.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('visualizerContainer').style.display = 'block';
+            const errEl = document.getElementById('emptyStateError');
+            errEl.style.display = 'none';
+        }
+
+        async function checkFile(forceProcess = false) {
             try {
                 let file;
                 if (fileHandle) {
@@ -302,7 +390,7 @@
                     return;
                 }
 
-                if (file.lastModified > lastModified || lastModified === 0) {
+                if (forceProcess || file.lastModified > lastModified || lastModified === 0) {
                     lastModified = file.lastModified;
                     const text = await file.text();
                     processLog(text);
@@ -314,17 +402,42 @@
 
         function processLog(text) {
             const rawReports = text.split('[HytaleGenerator] Performance Report');
-            if (rawReports.length < 2) return; 
+            if (rawReports.length < 2) {
+                showError("No performance reports found in this file.");
+                return; 
+            }
 
             // Parse all reports that have actual content (skip the first split part if empty header)
-            const newParsedReports = [];
+            let newParsedReports = [];
             for (let i = 1; i < rawReports.length; i++) {
                 if (rawReports[i].trim().length > 0) {
                     newParsedReports.push(parseReport(rawReports[i]));
                 }
             }
 
-            if (newParsedReports.length === 0) return;
+            if (newParsedReports.length === 0) {
+                showError("No valid performance reports could be parsed.");
+                return;
+            }
+            
+            const minSamplesCheckbox = document.getElementById('chkMinSamples');
+            if (minSamplesCheckbox && minSamplesCheckbox.checked) {
+                const minValEl = document.getElementById('minSamplesValue');
+                const minVal = minValEl ? parseInt(minValEl.value) || 500 : 500;
+                newParsedReports = newParsedReports.filter(r => {
+                    const count = parseInt(r.general['Sample Count']);
+                    return !isNaN(count) && count >= minVal;
+                });
+            }
+
+            if (newParsedReports.length === 0) {
+                const minValEl = document.getElementById('minSamplesValue');
+                const minVal = minValEl ? parseInt(minValEl.value) || 500 : 500;
+                showError(`Filtered out all reports. Try disabling the >=${minVal} Samples filter.`);
+                return;
+            }
+
+            hideError();
 
             // If new reports came in, update the list 
             // Only update viewIndex automatically if we were already looking at the latest
@@ -334,10 +447,18 @@
             
             if (wasAtLatest) {
                 viewIndex = allReports.length - 1;
+            } else if (viewIndex >= allReports.length) {
+                viewIndex = allReports.length - 1;
             }
 
             updateView();
             drawCharts();
+        }
+
+        function filterReports() {
+            if (staticFile || fileHandle) {
+                checkFile(true); // force re-process
+            }
         }
 
         function parseReport(reportText) {
@@ -350,7 +471,9 @@
                 if (!line) continue;
 
                 if (line.startsWith('Sample Count:')) {
-                    data.sampleCount = line.split(':')[1].trim();
+                    data.general['Sample Count'] = line.split(':')[1].trim();
+                } else if (line.startsWith('WorldStructure Name:')) {
+                    data.general['WorldStructure Name'] = line.split(':')[1].trim();
                 } else if (line.startsWith('Total:')) {
                     data.general['Total Time'] = parseFloat(line.split(':')[1].trim());
                 } else if (line.startsWith('Content Generation:')) {
@@ -405,6 +528,26 @@
             }
         }
 
+        const DOC_TOOLTIPS = {
+            'Sample Count': 'The number of chunks generated and averaged. Recommended >= 500 for better accuracy.',
+            'Total Time': 'The total time world-gen takes to generate and transfer the contents of a chunk to the world.',
+            'Content Generation': 'Total time chunk population takes to evaluate the chunk grid data.',
+            'Data Transfer': 'Time taken to serialize and compress the chunk structure data into raw buffers.',
+            'Preparation Stage': 'Includes Setup Stage (allocates buffer memory) and Finalization Stage (cleanup/recycling).',
+            'BiomeStage (Stage 0)': 'Impacted by Biome map Density, DefaultTransitionDistance, and MaxBiomeEdgeDistance. Usually cheap but significant with large outputs.',
+            'BiomeDistanceStage (Stage 1)': 'Impacted by DefaultTransitionDistance and MaxBiomeEdgeDistance.',
+            'TerrainStage (Stage 2)': 'Impacted by DefaultTransitionDistance, MaxBiomeEdgeDistance, Biome terrain Density, and Material Provider.',
+            'PropStage': 'Impacted by Props. Reduce horizontal size, keep in lowest possible Runtimes.',
+            'TintStage (Stage 3)': 'Impacted by each Biome\'s Tint Provider.',
+            'EnvironmentStage (Stage 4)': 'Impacted by each Biome\'s Environment Provider.',
+            'Layer Evaluation Stage': 'Evaluation of 2.5D map/grid systems (topsoil, terrain levels, noise grid). High time: too many layered grids or high res layers.',
+            'Rules Process Stage': 'Application of simple replace rules across blocks (noise conditions, simple replace). Often causes bottleneck if too many iterations/passes.',
+            'Node Process Stage': 'Placing large structures, prefabs, trees. High time: excessive structure placements over unoptimized sizes.',
+            'Block Process Stage': 'Per-block rules and micro-scale cellular automata. Worst cause for slowdowns. Avoid large scale operations per block.',
+            'Total Buffers': 'Should be closely monitored. OOM errors occur quickly if this scales linearly without chunk limits.',
+            'Missed/Total Ratio': 'Missed requests relative to cache hits. You want > 95% hit rate. Missed means real time parsing is occurring.'
+        };
+
         function renderSection(cardId, currentData, prevData, tolerance, unit) {
             const card = document.getElementById(cardId);
             const list = card.querySelector('.stat-list');
@@ -420,19 +563,29 @@
                 const nameDiv = document.createElement('div');
                 nameDiv.className = 'stat-name';
                 nameDiv.innerText = key;
+                if (DOC_TOOLTIPS[key]) {
+                    nameDiv.title = DOC_TOOLTIPS[key];
+                    nameDiv.style.textDecoration = 'underline dotted #888';
+                    nameDiv.style.cursor = 'help';
+                }
 
                 const valDiv = document.createElement('div');
                 valDiv.className = 'stat-value';
 
-                let displayVal = `${val.toFixed(2)} ${unit}`;
-                if (key === 'Total Requests') displayVal = val.toString(); 
+                let displayVal;
+                if (typeof val === 'number') {
+                    displayVal = `${val.toFixed(2)} ${unit}`;
+                    if (key === 'Total Requests') displayVal = val.toString(); 
+                } else {
+                    displayVal = val;
+                }
 
                 const textSpan = document.createElement('span');
                 textSpan.innerText = displayVal;
                 
                 valDiv.appendChild(textSpan);
 
-                if (prevVal !== null && prevVal !== undefined) {
+                if (typeof val === 'number' && typeof prevVal === 'number') {
                     const diff = val - prevVal;
                     if (Math.abs(diff) > tolerance) {
                         const arrow = document.createElement('span');
@@ -448,6 +601,36 @@
                         valDiv.appendChild(arrow);
                     }
                 }
+
+                if (typeof val === 'number' && allReports.length > 1) {
+                    const c = document.createElement('canvas');
+                    c.width = 80;
+                    c.height = 30;
+                    c.style.width = '40px';
+                    c.style.height = '15px';
+                    c.style.marginLeft = '8px';
+                    c.style.verticalAlign = 'middle';
+                    valDiv.appendChild(c);
+                    
+                    const sectionKey = cardId.replace('card-', '');
+                    const history = allReports.slice(Math.max(0, viewIndex - 20), viewIndex + 1).map(r => r[sectionKey] ? r[sectionKey][key] || 0 : 0);
+                    if (history.length > 1) {
+                        const ctx = c.getContext('2d');
+                        let minH = Math.min(...history);
+                        let maxH = Math.max(...history);
+                        if (maxH === minH) { maxH += 1; minH -= 1; }
+                        ctx.strokeStyle = '#aaaaaa';
+                        ctx.lineWidth = 2; // thicker line for double res
+                        ctx.beginPath();
+                        for (let i = 0; i < history.length; i++) {
+                            let x = (i / (history.length - 1)) * 80;
+                            let y = 30 - ((history[i] - minH) / (maxH - minH) * 30);
+                            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                        }
+                        ctx.stroke();
+                    }
+                }
+
                 row.appendChild(nameDiv);
                 row.appendChild(valDiv);
                 list.appendChild(row);
@@ -530,13 +713,48 @@
                 ctx.fillStyle = "white";
                 ctx.arc(currX, currY, 4, 0, Math.PI*2);
                 ctx.fill();
+
+                // Draw current value
+                ctx.fillStyle = "white";
+                ctx.font = '12px sans-serif';
+                ctx.fillText(dataArr[activeIndex].toFixed(2), currX + 8, currY - 8);
             }
+
+            // Draw Value Range indicator
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.font = '10px sans-serif';
+            ctx.fillText(`Max: ${maxVal.toFixed(2)}`, w - 70, 15);
+            ctx.fillText(`Min: ${minVal.toFixed(2)}`, w - 70, h - 10);
         }
 
         // Handle resizing window to redraw canvases to look correct
         window.addEventListener('resize', () => {
             drawCharts();
         });
+
+        // Chart interactivity
+        function setupChartInteractivity(canvasId) {
+            const canvas = document.getElementById(canvasId);
+            canvas.addEventListener('mousemove', (e) => {
+                if (allReports.length <= 1) return;
+                const rect = canvas.getBoundingClientRect();
+                const padding = 10;
+                const innerWidth = canvas.width - padding * 2;
+                if (innerWidth <= 0) return;
+                // Calculate index based on mouse X
+                let x = e.clientX - rect.left - padding;
+                let stepX = innerWidth / (allReports.length - 1);
+                let rawIndex = Math.round(x / stepX);
+                let newIndex = Math.max(0, Math.min(allReports.length - 1, rawIndex));
+                if (newIndex !== viewIndex) {
+                    viewIndex = newIndex;
+                    updateView();
+                    drawCharts();
+                }
+            });
+        }
+        setupChartInteractivity('timeChart');
+        setupChartInteractivity('memoryChart');
 
     </script>
 </body>
