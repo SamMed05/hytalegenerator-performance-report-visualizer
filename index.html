@@ -411,7 +411,12 @@
             let newParsedReports = [];
             for (let i = 1; i < rawReports.length; i++) {
                 if (rawReports[i].trim().length > 0) {
-                    newParsedReports.push(parseReport(rawReports[i]));
+                    const prevChunk = rawReports[i - 1].trimEnd();
+                    const lastLineOfPrev = prevChunk.substring(prevChunk.lastIndexOf('\n') + 1);
+                    const timeMatch = lastLineOfPrev.match(/\[([0-9\/\-\s:]+)\s*[A-Za-z]*\]/);
+                    let timestamp = timeMatch ? timeMatch[1].trim() : '';
+                    
+                    newParsedReports.push(parseReport(rawReports[i], timestamp));
                 }
             }
 
@@ -461,9 +466,12 @@
             }
         }
 
-        function parseReport(reportText) {
+        function parseReport(reportText, timestamp = null) {
             const lines = reportText.split('\n');
             const data = { general: {}, stages: {}, memory: {}, cache: {} };
+            if (timestamp) {
+                data.general['Date / Time'] = timestamp;
+            }
             let currentSection = data.general;
 
             for (let i = 0; i < lines.length; i++) {
