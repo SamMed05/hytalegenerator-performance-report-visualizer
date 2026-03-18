@@ -26,11 +26,14 @@
             justify-content: space-between;
             align-items: center;
             width: 100%;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         .controls {
             display: flex;
             gap: 10px;
             align-items: center;
+            flex-wrap: wrap;
         }
         button {
             background-color: #0e639c;
@@ -130,6 +133,7 @@
             gap: 20px;
             margin-top: 20px;
             width: 100%;
+            flex-wrap: wrap;
         }
         .chart-box {
             background-color: #252526;
@@ -137,7 +141,8 @@
             border-radius: 6px;
             padding: 15px;
             flex: 1;
-            height: 150px;
+            min-width: 300px;
+            height: 200px;
             position: relative;
         }
         .chart-box h3 {
@@ -158,6 +163,64 @@
             min-width: 170px;
             text-align: center;
         }
+
+        /* Tooltip styling */
+        [data-tooltip] {
+            position: relative;
+            cursor: help;
+        }
+
+        [data-tooltip]::before {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 120%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: #f1f1f1;
+            padding: 8px 12px;
+            border-radius: 6px;
+            white-space: normal;
+            font-size: 12px;
+            font-weight: normal;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 1000;
+            width: max-content;
+            max-width: 250px;
+            line-height: 1.4;
+            border: 1px solid #555;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.3);
+            pointer-events: none;
+            text-align: center;
+        }
+
+        [data-tooltip]:hover {
+            z-index: 10;
+        }
+
+        [data-tooltip]:hover::before {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        /* Adjust tooltip positioning if too close to edges for general controls */
+        .controls [data-tooltip]::before {
+            left: auto;
+            right: 0;
+            transform: none;
+        }
+        
+        .card [data-tooltip]::before {
+            left: 0;
+            transform: none;
+            text-align: left;
+        }
+        
+        button[data-tooltip] {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -171,8 +234,8 @@
             <span>HytaleGenerator Performance Report Visualizer</span>
             <div class="controls">
                 <a href="https://hytalemodding.dev/13-docs/12-game-mechanics/02-worldgen/03-world-generation-performance.html" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Optimization Docs ↗</a>
-                <button onclick="document.getElementById('tipsDialog').showModal()" style="background-color: #4cca88; color: #1e1e1e; font-weight: bold; border-radius: 50%; width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; margin-right: 15px;" title="Performance Tips">?</button>
-                <label style="font-size: 14px; display: flex; align-items: center; gap: 5px; cursor: pointer; margin-right: 10px;" title="Only show reports with >= X Sample Count">
+                <button onclick="document.getElementById('tipsDialog').showModal()" style="background-color: #4cca88; color: #1e1e1e; font-weight: bold; border-radius: 50%; width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; margin-right: 15px;" data-tooltip="Performance Tips">?</button>
+                <label style="font-size: 14px; display: flex; align-items: center; gap: 5px; cursor: pointer; margin-right: 10px;" data-tooltip="Only show reports with >= X Sample Count">
                     <input type="checkbox" id="chkMinSamples" onchange="filterReports()"> &gt;= <input type="number" id="minSamplesValue" value="500" min="0" step="50" style="width: 50px; background: #252526; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 2px 4px;" onclick="event.stopPropagation()" onchange="if(document.getElementById('chkMinSamples').checked) filterReports()" onkeyup="if(document.getElementById('chkMinSamples').checked) filterReports()"> Samples
                 </label>
                 <button id="btnPrev" disabled>&laquo; Older</button>
@@ -572,9 +635,8 @@
                 nameDiv.className = 'stat-name';
                 nameDiv.innerText = key;
                 if (DOC_TOOLTIPS[key]) {
-                    nameDiv.title = DOC_TOOLTIPS[key];
+                    nameDiv.setAttribute('data-tooltip', DOC_TOOLTIPS[key]);
                     nameDiv.style.textDecoration = 'underline dotted #888';
-                    nameDiv.style.cursor = 'help';
                 }
 
                 const valDiv = document.createElement('div');
@@ -662,12 +724,31 @@
             
             const times = allReports.map(r => r.general['Total Time'] || 0);
             const mems = allReports.map(r => r.memory['Total Buffers'] || 0);
+            let timeLabels = allReports.map(r => r.general['Date / Time'] || '');
+            
+            // Check if all dates are the same
+            const dates = timeLabels.map(t => {
+                const parts = t.trim().split(' ');
+                if (parts.length > 1) {
+                    parts.pop(); // Remove time
+                    return parts.join(' ');
+                }
+                return '';
+            }).filter(d => d !== '');
+            
+            const allSameDate = dates.length > 0 && dates.every(d => d === dates[0]);
+            if (allSameDate) {
+                timeLabels = timeLabels.map(t => {
+                    const parts = t.trim().split(' ');
+                    return parts.length > 1 ? parts.pop() : t;
+                });
+            }
 
-            drawSingleChart(document.getElementById('timeChart'), times, viewIndex, '#4cca88');
-            drawSingleChart(document.getElementById('memoryChart'), mems, viewIndex, '#3794ff');
+            drawSingleChart(document.getElementById('timeChart'), times, timeLabels, viewIndex, '#4cca88');
+            drawSingleChart(document.getElementById('memoryChart'), mems, timeLabels, viewIndex, '#3794ff');
         }
 
-        function drawSingleChart(canvas, dataArr, activeIndex, color) {
+        function drawSingleChart(canvas, dataArr, labelsArr, activeIndex, color) {
             const ctx = canvas.getContext('2d');
             // Adjust resolution for sharpness
             canvas.width = canvas.clientWidth;
@@ -675,7 +756,9 @@
             
             const w = canvas.width;
             const h = canvas.height;
-            const padding = 10;
+            const padding = 20;
+            const topPadding = 15;
+            const bottomPadding = 20;
             
             ctx.clearRect(0, 0, w, h);
             if (dataArr.length <= 1) {
@@ -690,6 +773,49 @@
             const range = maxVal - minVal || 1;
 
             const stepX = (w - padding * 2) / (dataArr.length - 1);
+            const chartH = h - topPadding - bottomPadding;
+
+            // Draw horizontal grid
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 1;
+            const gridLines = 4;
+            for (let i = 0; i <= gridLines; i++) {
+                let yy = topPadding + (chartH / gridLines) * i;
+                ctx.moveTo(padding, yy);
+                ctx.lineTo(w - padding, yy);
+            }
+            ctx.stroke();
+
+            // Draw vertical markers for each point
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+            for (let i = 0; i < dataArr.length; i++) {
+                let xx = padding + i * stepX;
+                ctx.moveTo(xx, topPadding);
+                ctx.lineTo(xx, topPadding + chartH);
+            }
+            ctx.stroke();
+
+            // Draw some time labels (equally spaced, max 6) to avoid overcrowding
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            let activeX = (activeIndex >= 0 && activeIndex < dataArr.length) ? padding + activeIndex * stepX : -1;
+            const numLabels = Math.min(6, dataArr.length);
+            for (let i = 0; i <= numLabels; i++) {
+                let idx = Math.floor((dataArr.length - 1) * (i / numLabels));
+                if (isNaN(idx)) continue;
+                let xx = padding + idx * stepX;
+                
+                if (labelsArr && labelsArr[idx]) {
+                    // Hide background grid label if it's too close to the active hover label to prevent overlapping overlap
+                    if (activeX < 0 || Math.abs(xx - activeX) > 40) {
+                        ctx.fillText(labelsArr[idx], xx, h - 5);
+                    }
+                }
+            }
+            ctx.textAlign = 'left';
 
             // Draw line
             ctx.beginPath();
@@ -697,7 +823,7 @@
             ctx.lineWidth = 2;
             for (let i = 0; i < dataArr.length; i++) {
                 const x = padding + i * stepX;
-                const y = padding + (h - padding * 2) - ((dataArr[i] - minVal) / range) * (h - padding * 2);
+                const y = topPadding + chartH - ((dataArr[i] - minVal) / range) * chartH;
                 if (i === 0) ctx.moveTo(x, y);
                 else ctx.lineTo(x, y);
             }
@@ -706,14 +832,14 @@
             // Draw current indicator
             if (activeIndex >= 0 && activeIndex < dataArr.length) {
                 const currX = padding + activeIndex * stepX;
-                const currY = padding + (h - padding * 2) - ((dataArr[activeIndex] - minVal) / range) * (h - padding * 2);
+                const currY = topPadding + chartH - ((dataArr[activeIndex] - minVal) / range) * chartH;
                 
                 // Vertical line
                 ctx.beginPath();
-                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
                 ctx.lineWidth = 1;
-                ctx.moveTo(currX, 0);
-                ctx.lineTo(currX, h);
+                ctx.moveTo(currX, topPadding);
+                ctx.lineTo(currX, topPadding + chartH);
                 ctx.stroke();
 
                 // Point dot
@@ -725,14 +851,40 @@
                 // Draw current value
                 ctx.fillStyle = "white";
                 ctx.font = '12px sans-serif';
-                ctx.fillText(dataArr[activeIndex].toFixed(2), currX + 8, currY - 8);
+                let valStr = dataArr[activeIndex].toFixed(2);
+                let valWidth = ctx.measureText(valStr).width;
+                if (currX + 8 + valWidth > w) {
+                    ctx.fillText(valStr, currX - valWidth - 8, currY - 8);
+                } else {
+                    ctx.fillText(valStr, currX + 8, currY - 8);
+                }
+
+                // Draw time below
+                if (labelsArr && labelsArr[activeIndex]) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 10px sans-serif';
+                    let timeStr = labelsArr[activeIndex];
+                    let timeWidth = ctx.measureText(timeStr).width;
+                    
+                    // Add background for clarity
+                    ctx.fillStyle = 'rgba(30, 30, 30, 0.8)';
+                    if (currX + 8 + timeWidth > w) {
+                        ctx.fillRect(currX - timeWidth - 10, h - 16, timeWidth + 4, 14);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillText(timeStr, currX - timeWidth - 8, h - 5);
+                    } else {
+                        ctx.fillRect(currX + 6, h - 16, timeWidth + 4, 14);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillText(timeStr, currX + 8, h - 5);
+                    }
+                }
             }
 
             // Draw Value Range indicator
             ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.font = '10px sans-serif';
             ctx.fillText(`Max: ${maxVal.toFixed(2)}`, w - 70, 15);
-            ctx.fillText(`Min: ${minVal.toFixed(2)}`, w - 70, h - 10);
+            ctx.fillText(`Min: ${minVal.toFixed(2)}`, w - 70, h - 25);
         }
 
         // Handle resizing window to redraw canvases to look correct
