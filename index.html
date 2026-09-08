@@ -293,12 +293,24 @@
                 <h2>Stages (ms)</h2>
                 <div class="stat-list"></div>
             </div>
+            <div class="card" id="card-transfer">
+                <h2>Data Transfer Details (ms)</h2>
+                <div class="stat-list"></div>
+            </div>
             <div class="card" id="card-memory">
                 <h2>Memory Usage (MB)</h2>
                 <div class="stat-list"></div>
             </div>
             <div class="card" id="card-cache">
                 <h2>Buffer Cache</h2>
+                <div class="stat-list"></div>
+            </div>
+            <div class="card" id="card-context">
+                <h2>Context Dependencies</h2>
+                <div class="stat-list"></div>
+            </div>
+            <div class="card" id="card-concurrency">
+                <h2>Concurrency</h2>
                 <div class="stat-list"></div>
             </div>
         </div>
@@ -475,11 +487,13 @@
             for (let i = 1; i < rawReports.length; i++) {
                 if (rawReports[i].trim().length > 0) {
                     const prevChunk = rawReports[i - 1].trimEnd();
-                    const lastLineOfPrev = prevChunk.substring(prevChunk.lastIndexOf('\n') + 1);
-                    const timeMatch = lastLineOfPrev.match(/\[([0-9\/\-\s:]+)\s*[A-Za-z]*\]/);
-                    let timestamp = timeMatch ? timeMatch[1].trim() : '';
+                    const timeMatches = [...prevChunk.matchAll(/\[(\d{4}[\/\-]\d{2}[\/\-]\d{2}\s+\d{2}:\d{2}:\d{2})[^\]]*\]/g)];
+                    let timestamp = timeMatches.length ? timeMatches[timeMatches.length - 1][1] : '';
                     
-                    newParsedReports.push(parseReport(rawReports[i], timestamp));
+                    const parsedReport = parseReport(rawReports[i], timestamp);
+                    if (Number.isFinite(parsedReport.general['Total Time'])) {
+                        newParsedReports.push(parsedReport);
+                    }
                 }
             }
 
@@ -531,46 +545,74 @@
 
         function parseReport(reportText, timestamp = null) {
             const lines = reportText.split('\n');
-            const data = { general: {}, stages: {}, memory: {}, cache: {} };
-            if (timestamp) {
-                data.general['Date / Time'] = timestamp;
-            }
-            let currentSection = data.general;
+            const data = { general: {}, stages: {}, transfer: {}, memory: {}, cache: {}, context: {}, concurrency: {} };
+            if (timestamp) data.general['Date / Time'] = timestamp;
 
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
+            let currentSection = data.general;
+            let currentStage = '';
+            let currentContextStage = '';
+            let currentMemoryGrid = '';
+
+            for (const rawLine of lines) {
+                const sourceLine = rawLine.trim();
+                if (!sourceLine) continue;
+
+                // Server logs prefix each report line with a timestamp and " - "; plain reports do not.
+                const separatorIndex = sourceLine.indexOf(' - ');
+                const line = separatorIndex >= 0 ? sourceLine.substring(separatorIndex + 3).trim() : sourceLine;
 
                 if (line.startsWith('Sample Count:')) {
-                    data.general['Sample Count'] = line.split(':')[1].trim();
+                    data.general['Sample Count'] = line.substring(line.indexOf(':') + 1).trim();
                 } else if (line.startsWith('WorldStructure Name:')) {
-                    data.general['WorldStructure Name'] = line.split(':')[1].trim();
+                    data.general['WorldStructure Name'] = line.substring(line.indexOf(':') + 1).trim();
                 } else if (line.startsWith('Total:')) {
-                    data.general['Total Time'] = parseFloat(line.split(':')[1].trim());
+                    data.general['Total Time'] = parseFloat(line.substring(line.indexOf(':') + 1));
                 } else if (line.startsWith('Content Generation:')) {
-                    data.general['Content Generation'] = parseFloat(line.split(':')[1].trim());
+                    data.general['Content Generation'] = parseFloat(line.substring(line.indexOf(':') + 1));
                 } else if (line.startsWith('Data Transfer:')) {
-                    data.general['Data Transfer'] = parseFloat(line.split(':')[1].trim());
-                } else if (line.includes('Stage') && line.includes('ms')) {
-                    const match = line.match(/(.*Stage.*?):\s*([\d.]+)\s*ms/);
-                    if (match) data.stages[match[1].trim()] = parseFloat(match[2]);
+                    data.general['Data Transfer'] = parseFloat(line.substring(line.indexOf(':') + 1));
+                    currentSection = data.transfer;
+                } else if (currentSection === data.transfer && /^(Materials Section \d+|Environment Section \d+|Environment Write|Tints|Entities|Block States):/.test(line)) {
+                    const match = line.match(/^(.+):\s*([\d.]+)\s*ms/);
+                    if (match) data.transfer[match[1]] = parseFloat(match[2]);
                 } else if (line.startsWith('Memory Usage Report')) {
                     currentSection = data.memory;
+                } else if (line.startsWith('Context Dependency Report')) {
+                    currentSection = data.context;
+                } else if (line.startsWith('Concurrency report:')) {
+                    currentSection = data.concurrency;
+                } else if (/^(Low|Normal|High) Priority:/.test(line)) {
+                    const match = line.match(/^(Low|Normal|High) Priority:\s*([\d.]+)\s*\/\s*([\d.]+)\s*threads/);
+                    if (match) currentSection[`${match[1]} Priority`] = `${match[2]} / ${match[3]} threads`;
+                } else if (/^.+\(Stage \d+\):\s*[\d.]+\s*ms$/.test(line)) {
+                    const match = line.match(/^(.+\(Stage \d+\)):\s*([\d.]+)\s*ms$/);
+                    currentSection = data.stages;
+                    currentStage = match[1].trim();
+                    data.stages[currentStage] = parseFloat(match[2]);
+                } else if (currentSection === data.stages && /^(Preparation|Execution|Async Processes Start):/.test(line)) {
+                    const match = line.match(/^(Preparation|Execution|Async Processes Start):\s*([\d.]+)\s*ms/);
+                    if (match && currentStage) data.stages[`${currentStage} / ${match[1]}`] = parseFloat(match[2]);
+                } else if (currentSection === data.context && /^.+\(Stage \d+\):$/.test(line)) {
+                    currentContextStage = line.slice(0, -1).trim();
+                } else if (currentSection === data.context && currentContextStage && line.startsWith('Output Size')) {
+                    const match = line.match(/^(Output Size \([^)]*\)):\s*(.+)$/);
+                    if (match) data.context[`${currentContextStage} / ${match[1]}`] = match[2].trim();
                 } else if (line.startsWith('Buffers Memory Usage:')) {
-                    data.memory['Total Buffers'] = parseFloat(line.split(':')[1].trim());
-                } else if (line.includes('Memory Footprint:') && currentSection === data.memory) {
-                    const prevLine = lines[i-1].trim();
-                    const match = prevLine.match(/(.* Grid \(Index.*?\)):/);
-                    if (match) {
-                        const valMatch = line.match(/Memory Footprint:\s*([\d.]+)\s*mb/);
-                        if (valMatch) data.memory[match[1]] = parseFloat(valMatch[1]);
-                    }
+                    data.memory['Total Buffers'] = parseFloat(line.substring(line.indexOf(':') + 1));
+                } else if (currentSection === data.memory && /^.+ Grid \(Index .*\):$/.test(line)) {
+                    currentMemoryGrid = line.slice(0, -1).trim();
+                } else if (currentSection === data.memory && line.startsWith('Memory Footprint:') && currentMemoryGrid) {
+                    data.memory[currentMemoryGrid] = parseFloat(line.match(/([\d.]+)\s*mb/)[1]);
+                } else if (currentSection === data.memory && line.startsWith('Buffer Count:') && currentMemoryGrid) {
+                    data.memory[`${currentMemoryGrid} / Buffer Count`] = parseFloat(line.substring(line.indexOf(':') + 1));
                 } else if (line.startsWith('Buffer Cache Report')) {
                     currentSection = data.cache;
                 } else if (line.startsWith('Missed/Total Ratio:')) {
-                    data.cache['Missed/Total Ratio'] = parseFloat(line.split(':')[1].trim().replace('%', ''));
+                    data.cache['Missed/Total Ratio'] = parseFloat(line.substring(line.indexOf(':') + 1).replace('%', ''));
                 } else if (line.startsWith('Total Cache Buffer Requests:')) {
-                    data.cache['Total Requests'] = parseFloat(line.split(':')[1].trim());
+                    data.cache['Total Requests'] = parseFloat(line.substring(line.indexOf(':') + 1));
+                } else if (line.startsWith('Missed Cache Buffer Requests:')) {
+                    data.cache['Missed Requests'] = parseFloat(line.substring(line.indexOf(':') + 1));
                 }
             }
             return data;
@@ -584,8 +626,11 @@
 
             renderSection('card-general', latest.general, prev ? prev.general : null, NOISE_TOLERANCE_MS, 'ms');
             renderSection('card-stages', latest.stages, prev ? prev.stages : null, NOISE_TOLERANCE_MS, 'ms');
+            renderSection('card-transfer', latest.transfer, prev ? prev.transfer : null, NOISE_TOLERANCE_MS, 'ms');
             renderSection('card-memory', latest.memory, prev ? prev.memory : null, NOISE_TOLERANCE_MB, 'MB');
             renderSection('card-cache', latest.cache, prev ? prev.cache : null, NOISE_TOLERANCE_PERCENT, '%');
+            renderSection('card-context', latest.context, prev ? prev.context : null, 0, '');
+            renderSection('card-concurrency', latest.concurrency, prev ? prev.concurrency : null, 0, '');
 
             // Update buttons
             btnPrev.disabled = (viewIndex === 0);
@@ -645,7 +690,7 @@
                 let displayVal;
                 if (typeof val === 'number') {
                     displayVal = `${val.toFixed(2)} ${unit}`;
-                    if (key === 'Total Requests') displayVal = val.toString(); 
+                    if (key === 'Total Requests' || key === 'Missed Requests' || key.includes('Buffer Count')) displayVal = val.toString();
                 } else {
                     displayVal = val;
                 }
@@ -761,18 +806,22 @@
             const bottomPadding = 20;
             
             ctx.clearRect(0, 0, w, h);
-            if (dataArr.length <= 1) {
+            if (dataArr.length === 0) {
                 ctx.fillStyle = '#666';
                 ctx.font = '12px sans-serif';
                 ctx.fillText("Waiting for more data points...", 10, h/2);
                 return;
             }
 
-            const minVal = Math.min(...dataArr) * 0.95;
-            const maxVal = Math.max(...dataArr) * 1.05;
+            const minData = Math.min(...dataArr);
+            const maxData = Math.max(...dataArr);
+            const paddingValue = (maxData - minData) * 0.05 || Math.max(Math.abs(minData) * 0.05, 1);
+            const minVal = minData - paddingValue;
+            const maxVal = maxData + paddingValue;
             const range = maxVal - minVal || 1;
 
-            const stepX = (w - padding * 2) / (dataArr.length - 1);
+            const stepX = dataArr.length > 1 ? (w - padding * 2) / (dataArr.length - 1) : 0;
+            const pointX = index => dataArr.length === 1 ? w / 2 : padding + index * stepX;
             const chartH = h - topPadding - bottomPadding;
 
             // Draw horizontal grid
@@ -791,7 +840,7 @@
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
             for (let i = 0; i < dataArr.length; i++) {
-                let xx = padding + i * stepX;
+                let xx = pointX(i);
                 ctx.moveTo(xx, topPadding);
                 ctx.lineTo(xx, topPadding + chartH);
             }
@@ -801,12 +850,12 @@
             ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
             ctx.font = '10px sans-serif';
             ctx.textAlign = 'center';
-            let activeX = (activeIndex >= 0 && activeIndex < dataArr.length) ? padding + activeIndex * stepX : -1;
+            let activeX = (activeIndex >= 0 && activeIndex < dataArr.length) ? pointX(activeIndex) : -1;
             const numLabels = Math.min(6, dataArr.length);
             for (let i = 0; i <= numLabels; i++) {
                 let idx = Math.floor((dataArr.length - 1) * (i / numLabels));
                 if (isNaN(idx)) continue;
-                let xx = padding + idx * stepX;
+                let xx = pointX(idx);
                 
                 if (labelsArr && labelsArr[idx]) {
                     // Hide background grid label if it's too close to the active hover label to prevent overlapping overlap
@@ -822,16 +871,26 @@
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             for (let i = 0; i < dataArr.length; i++) {
-                const x = padding + i * stepX;
+                const x = pointX(i);
                 const y = topPadding + chartH - ((dataArr[i] - minVal) / range) * chartH;
                 if (i === 0) ctx.moveTo(x, y);
                 else ctx.lineTo(x, y);
             }
             ctx.stroke();
 
+            // Keep every sample visible, including samples that are not active.
+            for (let i = 0; i < dataArr.length; i++) {
+                const x = pointX(i);
+                const y = topPadding + chartH - ((dataArr[i] - minVal) / range) * chartH;
+                ctx.beginPath();
+                ctx.fillStyle = color;
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
             // Draw current indicator
             if (activeIndex >= 0 && activeIndex < dataArr.length) {
-                const currX = padding + activeIndex * stepX;
+                const currX = pointX(activeIndex);
                 const currY = topPadding + chartH - ((dataArr[activeIndex] - minVal) / range) * chartH;
                 
                 // Vertical line
