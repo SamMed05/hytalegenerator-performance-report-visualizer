@@ -249,6 +249,25 @@
             font-size: 14px;
             color: #ddd;
         }
+        .source-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            margin-top: 8px;
+            color: #aaa;
+            font-size: 11px;
+        }
+        .source-legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .source-legend i {
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            border-radius: 2px;
+        }
         canvas {
             width: 100%;
             height: calc(100% - 30px);
@@ -344,7 +363,7 @@
 <body>
 
     <div id="dropZone">
-        Drop log file here to analyze
+        Drop log file(s) here to analyze
     </div>
 
     <h1>
@@ -360,8 +379,8 @@
                 <span id="historyIndicator">No Data</span>
                 <button id="btnNext" disabled>Newer &raquo;</button>
                 <button id="btnLatest" disabled>Live / Latest</button>
-                <button onclick="document.getElementById('fileInput').click()">Select File</button>
-                <input type="file" id="fileInput" accept=".txt,.log" />
+                <button onclick="document.getElementById('fileInput').click()">Select Files</button>
+                <input type="file" id="fileInput" accept=".txt,.log" multiple />
             </div>
         </div>
         <div id="status" style="font-size: 14px; font-weight: normal; color: #888;">Drag & Drop a log file anywhere</div>
@@ -385,7 +404,7 @@
     <div id="emptyState" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 60vh; color: #666; border: 2px dashed #444; border-radius: 10px; margin-top: 20px; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.borderColor='#666'; this.style.color='#888'" onmouseout="this.style.borderColor='#444'; this.style.color='#666'" onclick="document.getElementById('fileInput').click()">
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 20px;"><path d="M21.2 15c.7-1.2 1-2.5 .7-3.9-.6-2-2.4-3.5-4.4-3.5h-1.2c-.7-3-3.2-5.2-6.2-5.6-3-.3-5.9 1.3-7.3 4-1.2 2.5-1 6.5.5 8.8m8.7-1.6V21"/><path d="M16 16l-4-4-4 4"/></svg>
         <span id="emptyStateError" style="color: #f14c4c; font-size: 14px; margin-bottom: 10px; display: none;"></span>
-        <h2 style="margin: 0;">Drag & Drop a world generation log</h2>
+        <h2 style="margin: 0;">Drag & Drop world generation log(s)</h2>
         <p style="margin-top: 10px;">or click here to browse files</p>
     </div>
     
@@ -395,6 +414,7 @@
             <div class="chart-box">
                 <h3>Total Time History (ms)</h3>
                 <canvas id="timeChart"></canvas>
+                <div id="sourceLegend" class="source-legend"></div>
             </div>
             <div class="chart-box">
                 <h3>Total Buffers Memory (MB)</h3>
@@ -439,9 +459,8 @@
     </div>
 
     <script>
-        let fileHandle = null;
-        let staticFile = null;
-        let lastModified = 0;
+        let sources = [];
+        let liveSource = null;
         let pollInterval = null;
         
         let allReports = [];
@@ -489,7 +508,7 @@
 
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
-                handleStaticFile(e.target.files[0]);
+                handleStaticFiles([...e.target.files]);
             }
             e.target.value = ''; // Reset input to allow selecting the same file again
         });
@@ -516,14 +535,20 @@
 
             if (!e.dataTransfer.items || e.dataTransfer.items.length === 0) return;
 
-            const item = e.dataTransfer.items[0];
-            if (item.kind !== 'file') return;
+            const fileItems = [...e.dataTransfer.items].filter(item => item.kind === 'file');
+            if (fileItems.length === 0) return;
+            const droppedFiles = [...(e.dataTransfer.files || [])];
 
             try {
-                if ('getAsFileSystemHandle' in item) {
-                    const handle = await item.getAsFileSystemHandle();
-                    if (handle && handle.kind === 'file') {
-                        startLiveTracking(handle);
+                if ('getAsFileSystemHandle' in fileItems[0]) {
+                    const handles = [];
+                    for (const item of fileItems) {
+                        const handle = await item.getAsFileSystemHandle();
+                        if (!handle || handle.kind !== 'file') throw new Error('File handle unavailable');
+                        handles.push(handle);
+                    }
+                    if (handles.length > 0) {
+                        startLiveTracking(handles);
                         return;
                     }
                 }
@@ -531,25 +556,28 @@
                 console.warn("Falling back to static file drop.", err);
             }
 
-            const file = item.getAsFile();
-            if (file) handleStaticFile(file);
+            handleStaticFiles(droppedFiles.length > 0
+                ? droppedFiles
+                : fileItems.map(item => item.getAsFile()).filter(Boolean));
         });
 
-        function handleStaticFile(file) {
-            fileHandle = null;
-            staticFile = file; 
-            lastModified = 0; // Reset to force re-reading the entire new file
-            document.getElementById('status').innerText = `Viewing ${file.name}`;
+        function handleStaticFiles(files) {
+            if (files.length === 0) return;
+            sources = files.map(file => ({ file, name: file.name, lastModified: 0, reports: [] }));
+            liveSource = null;
+            document.getElementById('status').innerText = sources.length === 1
+                ? `Viewing ${sources[0].name}`
+                : `Comparing ${sources.length} log files`;
             document.getElementById('emptyState').style.display = 'none';
             document.getElementById('visualizerContainer').style.display = 'block';
             startPolling();
         }
 
-        function startLiveTracking(handle) {
-            fileHandle = handle;
-            staticFile = null;
-            lastModified = 0; // Reset to force re-reading the entire new file
-            document.getElementById('status').innerText = `Tracking ${handle.name} live...`;
+        function startLiveTracking(handles) {
+            sources = handles.map(handle => ({ handle, name: handle.name, lastModified: 0, reports: [] }));
+            document.getElementById('status').innerText = sources.length === 1
+                ? `Tracking ${sources[0].name} live...`
+                : `Comparing ${sources.length} logs; tracking the newest file live`;
             document.getElementById('emptyState').style.display = 'none';
             document.getElementById('visualizerContainer').style.display = 'block';
             startPolling();
@@ -557,8 +585,8 @@
 
         function startPolling() {
             if (pollInterval) clearInterval(pollInterval);
-            checkFile(); 
-            pollInterval = setInterval(checkFile, 2000);
+            processSources(true);
+            pollInterval = setInterval(() => processSources(false), 2000);
         }
 
         function showError(msg) {
@@ -576,36 +604,33 @@
             errEl.style.display = 'none';
         }
 
-        async function checkFile(forceProcess = false) {
+        async function processSources(forceProcess = false) {
             try {
-                let file;
-                if (fileHandle) {
-                    file = await fileHandle.getFile();
-                } else if (staticFile) {
-                    file = staticFile;
-                } else {
-                    return;
+                if (sources.length === 0) return;
+                const sourcesToRead = forceProcess || !liveSource ? sources : [liveSource];
+                for (const source of sourcesToRead) {
+                    const file = source.handle ? await source.handle.getFile() : source.file;
+                    if (forceProcess || source.lastModified === 0 || file.lastModified > source.lastModified) {
+                        source.lastModified = file.lastModified;
+                        source.reports = parseLogText(await file.text(), source.name);
+                    }
                 }
 
-                if (forceProcess || file.lastModified > lastModified || lastModified === 0) {
-                    lastModified = file.lastModified;
-                    const text = await file.text();
-                    processLog(text);
+                if (!liveSource) {
+                    liveSource = sources.reduce((latest, source) =>
+                        !latest || source.lastModified > latest.lastModified ? source : latest, null);
                 }
+                rebuildReports();
             } catch (error) {
                 console.error("Error reading file:", error);
             }
         }
 
-        function processLog(text) {
+        function parseLogText(text, sourceName) {
             const rawReports = text.split('[HytaleGenerator] Performance Report');
-            if (rawReports.length < 2) {
-                showError("No performance reports found in this file.");
-                return; 
-            }
+            if (rawReports.length < 2) return [];
 
-            // Parse all reports that have actual content (skip the first split part if empty header)
-            let newParsedReports = [];
+            const parsedReports = [];
             for (let i = 1; i < rawReports.length; i++) {
                 if (rawReports[i].trim().length > 0) {
                     const prevChunk = rawReports[i - 1].trimEnd();
@@ -614,13 +639,24 @@
                     
                     const parsedReport = parseReport(rawReports[i], timestamp);
                     if (Number.isFinite(parsedReport.general['Total Time'])) {
-                        newParsedReports.push(parsedReport);
+                        parsedReport.sourceName = sourceName;
+                        parsedReports.push(parsedReport);
                     }
                 }
             }
+            return parsedReports;
+        }
+
+        function rebuildReports() {
+            let newParsedReports = sources.flatMap(source => source.reports);
+            newParsedReports.sort((left, right) => {
+                const leftDate = Date.parse((left.general['Date / Time'] || '').replaceAll('/', '-')) || 0;
+                const rightDate = Date.parse((right.general['Date / Time'] || '').replaceAll('/', '-')) || 0;
+                return leftDate - rightDate;
+            });
 
             if (newParsedReports.length === 0) {
-                showError("No valid performance reports could be parsed.");
+                showError("No valid performance reports could be parsed from the selected files.");
                 return;
             }
             
@@ -660,8 +696,8 @@
         }
 
         function filterReports() {
-            if (staticFile || fileHandle) {
-                checkFile(true); // force re-process
+            if (sources.length > 0) {
+                processSources(true); // force re-process
             }
         }
 
@@ -915,11 +951,14 @@
         });
 
         // Small custom canvas charting 
+        const SOURCE_COLORS = ['#4cca88', '#3794ff', '#f0b35b', '#d779ff', '#f16b6b', '#63d7d0'];
+
         function drawCharts() {
             if (allReports.length === 0) return;
             
             const times = allReports.map(r => r.general['Total Time'] || 0);
             const mems = allReports.map(r => r.memory['Total Buffers'] || 0);
+            const sourceNames = allReports.map(r => r.sourceName || 'Unknown file');
             let timeLabels = allReports.map(r => r.general['Date / Time'] || '');
             
             // Check if all dates are the same
@@ -940,11 +979,26 @@
                 });
             }
 
-            drawSingleChart(document.getElementById('timeChart'), times, timeLabels, viewIndex, '#4cca88');
-            drawSingleChart(document.getElementById('memoryChart'), mems, timeLabels, viewIndex, '#3794ff');
+            drawSingleChart(document.getElementById('timeChart'), times, timeLabels, viewIndex, '#4cca88', sourceNames);
+            drawSingleChart(document.getElementById('memoryChart'), mems, timeLabels, viewIndex, '#3794ff', sourceNames);
+            renderSourceLegend(sourceNames);
         }
 
-        function drawSingleChart(canvas, dataArr, labelsArr, activeIndex, color) {
+        function renderSourceLegend(sourceNames) {
+            const legend = document.getElementById('sourceLegend');
+            const uniqueSources = [...new Set(sourceNames)];
+            legend.innerHTML = '';
+            uniqueSources.forEach((name, index) => {
+                const entry = document.createElement('span');
+                const swatch = document.createElement('i');
+                swatch.style.backgroundColor = SOURCE_COLORS[index % SOURCE_COLORS.length];
+                entry.appendChild(swatch);
+                entry.appendChild(document.createTextNode(name));
+                legend.appendChild(entry);
+            });
+        }
+
+        function drawSingleChart(canvas, dataArr, labelsArr, activeIndex, color, sourceNames) {
             const ctx = canvas.getContext('2d');
             // Adjust resolution for sharpness
             canvas.width = canvas.clientWidth;
@@ -974,6 +1028,18 @@
             const stepX = dataArr.length > 1 ? (w - padding * 2) / (dataArr.length - 1) : 0;
             const pointX = index => dataArr.length === 1 ? w / 2 : padding + index * stepX;
             const chartH = h - topPadding - bottomPadding;
+
+            // Tint the plot by source so adjacent samples from different files are easy to spot.
+            const uniqueSources = [...new Set(sourceNames)];
+            if (uniqueSources.length > 1) {
+                for (let i = 0; i < dataArr.length; i++) {
+                    const sourceIndex = uniqueSources.indexOf(sourceNames[i]);
+                    const left = i === 0 ? padding : (pointX(i - 1) + pointX(i)) / 2;
+                    const right = i === dataArr.length - 1 ? w - padding : (pointX(i) + pointX(i + 1)) / 2;
+                    ctx.fillStyle = `${SOURCE_COLORS[sourceIndex % SOURCE_COLORS.length]}18`;
+                    ctx.fillRect(left, topPadding, right - left, chartH);
+                }
+            }
 
             // Draw horizontal grid
             ctx.beginPath();
