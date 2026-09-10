@@ -791,6 +791,9 @@
                     data.general['Total Time'] = parseFloat(line.substring(line.indexOf(':') + 1));
                 } else if (line.startsWith('Content Generation:')) {
                     data.general['Content Generation'] = parseFloat(line.substring(line.indexOf(':') + 1));
+                } else if (line.startsWith('Access Initialization:')) {
+                    data.stages['Access Initialization'] = parseFloat(line.substring(line.indexOf(':') + 1));
+                    currentSection = data.stages;
                 } else if (line.startsWith('Data Transfer:')) {
                     data.general['Data Transfer'] = parseFloat(line.substring(line.indexOf(':') + 1));
                     currentSection = data.transfer;
@@ -876,23 +879,37 @@
         }
 
         const DOC_TOOLTIPS = {
-            'Sample Count': 'The number of chunks generated and averaged. Recommended >= 500 for better accuracy.',
-            'Total Time': 'The total time world-gen takes to generate and transfer the contents of a chunk to the world.',
-            'Content Generation': 'Total time chunk population takes to evaluate the chunk grid data.',
-            'Data Transfer': 'Time taken to serialize and compress the chunk structure data into raw buffers.',
-            'Preparation Stage': 'Includes Setup Stage (allocates buffer memory) and Finalization Stage (cleanup/recycling).',
-            'BiomeStage (Stage 0)': 'Impacted by Biome map Density, DefaultTransitionDistance, and MaxBiomeEdgeDistance. Usually cheap but significant with large outputs.',
-            'BiomeDistanceStage (Stage 1)': 'Impacted by DefaultTransitionDistance and MaxBiomeEdgeDistance.',
-            'TerrainStage (Stage 2)': 'Impacted by DefaultTransitionDistance, MaxBiomeEdgeDistance, Biome terrain Density, and Material Provider.',
+            'Sample Count': 'The number of generation samples aggregated to calculate the average times shown.',
+            'WorldStructure Name': 'The name of the world structure being generated.',
+            'Thread': 'The thread handling generation for the world structure.',
+            'Total Time': 'The overall average time taken for the entire chunk generation run.',
+            'Content Generation': 'The total time spent on the core generation work, encompassing all stages and tile tasks.',
+            'Access Initialization': 'The time spent setting up memory access boundaries and initializing buffers for the chunk.',
+            'Preparation': 'The time spent getting tasks ready for a specific generation stage, such as organizing positions and building worker task lists.',
+            'Execution': 'The complete time taken to run a specific stage, including waiting for all asynchronous background tasks to finish.',
+            'Async Processes Start': 'The slight overhead required to schedule and launch background tasks, not the time spent actually executing them.',
+            'Data Transfer': 'The time spent copying the fully generated data from temporary buffers into the final output chunk.',
+            'Materials Section': 'Time taken to transfer data for an individual vertical slice of a chunk.',
+            'Environment Section': 'Time spent sampling environment IDs across an 8×8 block column sub-area spanning full world height.',
+            'Environment Write': 'Time spent committing the bulk environment data collected by all environment tasks into the chunk\'s environment storage.',
+            'Tints': 'Time taken to transfer tint data.',
+            'Entities': 'Time taken to transfer entity data.',
+            'Block States': 'Time taken to transfer block state data.',
+            'Total Buffers': 'Estimate of how much RAM, in megabytes, is being consumed by the generation data buffers.',
+            'Buffer Count': 'The total number of memory buffer columns actively allocated within a specific grid.',
+            'Memory Footprint': 'The estimated memory size of a grid, accounting for its contained data, arrays, and structural overhead.',
+            'Context Dependency Report': 'The total physical area, measured in grids or chunks, that the generator needs to read from or write to in order to output the requested chunk.',
+            'Output Size (Buffer Column)': 'Dimensions (X and Z) in 8×8 block columns that a stage must generate to satisfy the dependency margins of all subsequent stages.',
+            'Output Size (Chunk Column)': 'The stage\'s required dependency footprint converted into 32×32 block chunk units (Buffer Column size multiplied by 0.25).',
+            'Total Requests': 'The number of times the generator looked for previously generated data.',
+            'Missed Requests': 'The number of data requests that were missing and required fresh generation.',
+            'Missed/Total Ratio': 'The percentage of data requests that required new generation rather than efficiently reusing previously cached data.',
+            'BiomeStage (Stage 0)': 'Generates the 2D map of biome IDs for each column. Generally lightweight, but performance is impacted by Biome Map noise complexity and the total output area expanded by downstream transition margins.',
+            'BiomeDistanceStage (Stage 1)': 'Scans neighboring columns to calculate distances to nearby biomes for blending. Performance is heavily impacted by search radius parameters (DefaultTransitionDistance, MaxBiomeEdgeDistance) and biome border frequency.',
+            'TerrainStage (Stage 2)': 'Generates main terrain and assigns materials via density graphs and column depth analysis. Typically the largest CPU bottleneck; heavily impacted by 3D noises, multi-biome blending passes, and Material Provider evaluation.',
             'PropStage': 'Impacted by Props. Reduce horizontal size, keep in lowest possible Runtimes.',
             'TintStage (Stage 3)': 'Impacted by each Biome\'s Tint Provider.',
             'EnvironmentStage (Stage 4)': 'Impacted by each Biome\'s Environment Provider.',
-            'Layer Evaluation Stage': 'Evaluation of 2.5D map/grid systems (topsoil, terrain levels, noise grid). High time: too many layered grids or high res layers.',
-            'Rules Process Stage': 'Application of simple replace rules across blocks (noise conditions, simple replace). Often causes bottleneck if too many iterations/passes.',
-            'Node Process Stage': 'Placing large structures, prefabs, trees. High time: excessive structure placements over unoptimized sizes.',
-            'Block Process Stage': 'Per-block rules and micro-scale cellular automata. Worst cause for slowdowns. Avoid large scale operations per block.',
-            'Total Buffers': 'Should be closely monitored. OOM errors occur quickly if this scales linearly without chunk limits.',
-            'Missed/Total Ratio': 'Missed requests relative to cache hits. You want > 95% hit rate. Missed means real time parsing is occurring.'
         };
 
         function renderSection(cardId, currentData, prevData, tolerance, unit) {
@@ -928,8 +945,11 @@
                 nameDiv.innerText = (cardId === 'card-stages' || cardId === 'card-memory' || cardId === 'card-context') && key.includes(' / ')
                     ? key.substring(key.lastIndexOf(' / ') + 3)
                     : key;
-                if (DOC_TOOLTIPS[key]) {
-                    nameDiv.setAttribute('data-tooltip', DOC_TOOLTIPS[key]);
+                const tooltipKey = key.includes(' / ')
+                    ? key.substring(key.lastIndexOf(' / ') + 3)
+                    : key;
+                if (DOC_TOOLTIPS[tooltipKey]) {
+                    nameDiv.setAttribute('data-tooltip', DOC_TOOLTIPS[tooltipKey]);
                     nameDiv.style.textDecoration = 'underline dotted #888';
                 }
 
