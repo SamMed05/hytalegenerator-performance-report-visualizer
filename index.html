@@ -248,14 +248,44 @@
             margin: 0 0 10px 0;
             font-size: 14px;
             color: #ddd;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
         }
         .source-legend {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px 12px;
-            margin-top: 8px;
+            display: grid;
+            grid-template-columns: repeat(3, max-content);
+            grid-auto-rows: minmax(14px, auto);
+            gap: 3px 10px;
+            max-width: 65%;
+            max-height: 31px;
+            overflow-y: auto;
+            flex-shrink: 1;
             color: #aaa;
             font-size: 11px;
+            font-weight: normal;
+            scrollbar-width: thin;
+            scrollbar-color: #555 #252526;
+        }
+        .source-legend::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .source-legend::-webkit-scrollbar-track {
+            background: #252526;
+        }
+        .source-legend::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 3px;
+        }
+        .source-legend::-webkit-scrollbar-thumb:hover {
+            background: #777;
+        }
+        .source-legend::-webkit-scrollbar-button {
+            display: none;
+            width: 0;
+            height: 0;
         }
         .source-legend span {
             display: inline-flex;
@@ -370,14 +400,20 @@
         <div class="header-top">
             <span>HytaleGenerator Performance Report Visualizer</span>
             <div class="controls">
-                <a href="https://hytalemodding.dev/en/docs/official-documentation/worldgen/worldgen-tutorial/optimization-wip" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Optimization Docs ↗</a>
+                <a href="https://hytalemodding.dev/en/docs/official-documentation/worldgen/worldgen-tutorial/optimization-wip" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Docs ↗</a>
                 <button onclick="document.getElementById('tipsDialog').showModal()" style="background-color: #4cca88; color: #1e1e1e; font-weight: bold; border-radius: 50%; width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; margin-right: 15px;" data-tooltip="Performance Tips">?</button>
                 <label style="font-size: 14px; display: flex; align-items: center; gap: 5px; cursor: pointer; margin-right: 10px;" data-tooltip="Only show reports with >= X Sample Count">
                     <input type="checkbox" id="chkMinSamples" onchange="filterReports()"> &gt;= <input type="number" id="minSamplesValue" value="500" min="0" step="50" style="width: 50px; background: #252526; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 2px 4px;" onclick="event.stopPropagation()" onchange="if(document.getElementById('chkMinSamples').checked) filterReports()" onkeyup="if(document.getElementById('chkMinSamples').checked) filterReports()"> Samples
                 </label>
-                <button id="btnPrev" disabled>&laquo; Older</button>
+                <label for="worldstructureFilter" style="font-size: 14px; display: flex; align-items: center; gap: 5px; margin-right: 10px;">
+                    Worldstructure
+                    <select id="worldstructureFilter" onchange="filterReports()" disabled style="max-width: 180px; background: #252526; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 3px 4px;">
+                        <option value="">All</option>
+                    </select>
+                </label>
+                <button id="btnPrev" disabled>&laquo;</button>
                 <span id="historyIndicator">No Data</span>
-                <button id="btnNext" disabled>Newer &raquo;</button>
+                <button id="btnNext" disabled>&raquo;</button>
                 <button id="btnLatest" disabled>Live / Latest</button>
                 <button onclick="document.getElementById('fileInput').click()">Select Files</button>
                 <input type="file" id="fileInput" accept=".txt,.log" multiple />
@@ -412,9 +448,11 @@
         
         <div class="charts-container">
             <div class="chart-box">
-                <h3>Total Time History (ms)</h3>
+                <h3>
+                    <span>Total Time History (ms)</span>
+                    <div id="sourceLegend" class="source-legend"></div>
+                </h3>
                 <canvas id="timeChart"></canvas>
-                <div id="sourceLegend" class="source-legend"></div>
             </div>
             <div class="chart-box">
                 <h3>Total Buffers Memory (MB)</h3>
@@ -505,6 +543,7 @@
         const btnNext = document.getElementById('btnNext');
         const btnLatest = document.getElementById('btnLatest');
         const historyIndicator = document.getElementById('historyIndicator');
+        const worldstructureFilter = document.getElementById('worldstructureFilter');
 
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
@@ -655,8 +694,17 @@
                 return leftDate - rightDate;
             });
 
+            updateWorldstructureOptions(newParsedReports);
+
+            if (worldstructureFilter.value) {
+                newParsedReports = newParsedReports.filter(report =>
+                    report.general['WorldStructure Name'] === worldstructureFilter.value);
+            }
+
             if (newParsedReports.length === 0) {
-                showError("No valid performance reports could be parsed from the selected files.");
+                showError(worldstructureFilter.value
+                    ? `No reports found for worldstructure "${worldstructureFilter.value}".`
+                    : "No valid performance reports could be parsed from the selected files.");
                 return;
             }
             
@@ -698,6 +746,22 @@
         function filterReports() {
             if (sources.length > 0) {
                 processSources(true); // force re-process
+            }
+        }
+
+        function updateWorldstructureOptions(reports) {
+            const currentValue = worldstructureFilter.value;
+            const names = [...new Set(reports
+                .map(report => report.general['WorldStructure Name'])
+                .filter(Boolean))].sort((left, right) => left.localeCompare(right));
+
+            worldstructureFilter.innerHTML = '';
+            worldstructureFilter.appendChild(new Option('All', ''));
+            names.forEach(name => worldstructureFilter.appendChild(new Option(name, name)));
+            worldstructureFilter.disabled = names.length === 0;
+
+            if (names.includes(currentValue)) {
+                worldstructureFilter.value = currentValue;
             }
         }
 
