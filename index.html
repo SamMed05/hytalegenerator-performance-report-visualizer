@@ -90,6 +90,7 @@
         .stat-row {
             display: flex;
             justify-content: space-between;
+            gap: 8px;
             padding: 5px 0;
             border-bottom: 1px solid #333;
         }
@@ -98,6 +99,14 @@
         }
         .stat-name {
             font-weight: bold;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .stat-name.deprecated-field {
+            color: #f0b35b;
         }
         #card-stages .stat-row.stage-detail {
             padding: 3px 0 3px 18px;
@@ -190,6 +199,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-shrink: 0;
             white-space: nowrap;
         }
         .arrow {
@@ -370,6 +380,35 @@
             cursor: pointer;
         }
 
+        [data-tooltip]::before {
+            display: none !important;
+        }
+
+        #tooltipPopup {
+            display: none;
+            position: fixed;
+            max-width: 300px;
+            padding: 8px 12px;
+            background-color: #333;
+            color: #f1f1f1;
+            border: 1px solid #555;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            font-size: 12px;
+            font-weight: normal;
+            line-height: 1.4;
+            white-space: normal;
+            pointer-events: none;
+            z-index: 2000;
+        }
+
+        #tooltipPopup .tooltip-title {
+            display: block;
+            margin-bottom: 3px;
+            color: #4cca88;
+            font-weight: bold;
+        }
+
         @media (max-width: 1100px) {
             .container {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -395,12 +434,14 @@
     <div id="dropZone">
         Drop log file(s) here to analyze
     </div>
+    <div id="tooltipPopup" role="tooltip"></div>
 
     <h1>
         <div class="header-top">
             <span>HytaleGenerator Performance Report Visualizer</span>
             <div class="controls">
-                <a href="https://hytalemodding.dev/en/docs/official-documentation/worldgen/worldgen-tutorial/optimization-wip" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Docs ↗</a>
+                <a href="https://pre-release.docs.hytale.com/creating-content/world-generation/performance-optimization/" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Perf Docs ↗</a>
+                <a href="https://pre-release.docs.hytale.com/hytale-generator/prop-runtime/" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Prop Runtime ↗</a>
                 <button onclick="document.getElementById('tipsDialog').showModal()" style="background-color: #4cca88; color: #1e1e1e; font-weight: bold; border-radius: 50%; width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; margin-right: 15px;" data-tooltip="Performance Tips">?</button>
                 <label style="font-size: 14px; display: flex; align-items: center; gap: 5px; cursor: pointer; margin-right: 10px;" data-tooltip="Only show reports with >= X Sample Count">
                     <input type="checkbox" id="chkMinSamples" onchange="filterReports()"> &gt;= <input type="number" id="minSamplesValue" value="500" min="0" step="50" style="width: 50px; background: #252526; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 2px 4px;" onclick="event.stopPropagation()" onchange="if(document.getElementById('chkMinSamples').checked) filterReports()" onkeyup="if(document.getElementById('chkMinSamples').checked) filterReports()"> Samples
@@ -425,14 +466,13 @@
     <dialog id="tipsDialog" style="background: #252526; color: #d4d4d4; border: 1px solid #4cca88; border-radius: 8px; max-width: 810px; padding: 20px;">
         <h2 style="color: #4cca88; margin-top: 0;">Optimization Tips</h2>
         <ul style="font-size: 14px; line-height: 1.6;">
-            <li><b>Use 2D over 3D:</b> Try to use 2D where possible. 3D domain warping tends to invalidate 2D caches.</li>
-            <li><b>Caching:</b> Put Cache nodes on the right side of all YOverride nodes.</li>
-            <li><b>Transition Distances:</b> In WorldStructure, don't use DefaultTransitionDistance and MaxBiomeEdgeDistance values greater than necessary.</li>
-            <li><b>Mixers:</b> Use Mix at the root of Biomes to replace area above max height with Constant Density -1, and underground with 1.</li>
-            <li><b>Sampling:</b> Try to use YSampled (distance 8) where possible to reduce vertical calculations.</li>
-            <li><b>Runtimes:</b> Reduce distinct Runtime indices across all Biomes. Structure Biomes to fit as many Props as possible within the same Runtime.</li>
-            <li><b>Prop Sizes:</b> Reduce the size of the horizontally largest Prop. Put large Props at the lowest Runtime index.</li>
-            <li><b>Materials:</b> Inside Material Providers, use the Terrain Density node to calculate terrain gradient (much faster than importing root Density).</li>
+            <li><b>Measure consistently:</b> Prefer reports with at least 500 samples. Compare the same seed and locations after each change, explore multiple areas, and account for CPU, RAM, thermals, and the slower first chunk after teleporting or world creation.</li>
+            <li><b>Read output size:</b> A stage's Average Actual Output Size is the sampled area it really generated. Later stages determine the output size of earlier stages, so reducing Prop context can improve several earlier stages at once.</li>
+            <li><b>Reduce terrain work:</b> Keep DefaultTransitionDistance and MaxBiomeEdgeDistance no larger than needed. Use Mix to mask expensive Density outside the region where it is needed, including Constant -1 above terrain and Constant 1 underground.</li>
+            <li><b>Sample and cache Density:</b> Use YSampled where detail permits; the documentation recommends starting with SampleDistance 8 and using smaller distances where needed. Put Cache nodes to the right (downstream) of YOverride, and prefer 2D domain warping where possible because 3D warping can invalidate child 2D caches.</li>
+            <li><b>Limit Material work:</b> Restrict expensive Material Providers to the smallest horizontal and depth range. Use the Terrain Density node for gradients inside Material Providers so existing terrain buffers can be reused; only add gradients where they are genuinely needed.</li>
+            <li><b>Choose Runtime Context Precision:</b> Start with Biome as the safe baseline. Use Chunk when Props are sparse or must read the world; use Prop for large, widely spaced Props when the extra bounds calculation pays off. Dense or expensive Prop Distributions can make Prop precision slower.</li>
+            <li><b>Organize Prop Runtimes:</b> Separate different Prop Distribution types when they have different sizes or Position behavior, but avoid unnecessary Runtime indices. Put large horizontal Props at the lowest practical index, keep Runtime sizes small, and use matching Runtime indices across Biomes in a World Structure.</li>
         </ul>
         <button onclick="document.getElementById('tipsDialog').close()" style="float: right;">Close</button>
     </dialog>
@@ -544,6 +584,58 @@
         const btnLatest = document.getElementById('btnLatest');
         const historyIndicator = document.getElementById('historyIndicator');
         const worldstructureFilter = document.getElementById('worldstructureFilter');
+        const tooltipPopup = document.getElementById('tooltipPopup');
+        let tooltipTarget = null;
+
+        function hideTooltip() {
+            tooltipTarget = null;
+            tooltipPopup.style.display = 'none';
+        }
+
+        function positionTooltip(event) {
+            if (!tooltipTarget) return;
+
+            const gap = 12;
+            const bounds = tooltipPopup.getBoundingClientRect();
+            let left = event.clientX + gap;
+            let top = event.clientY - bounds.height - gap;
+            if (left + bounds.width > window.innerWidth - gap) left = event.clientX - bounds.width - gap;
+            if (top < gap) top = event.clientY + gap;
+            tooltipPopup.style.left = `${Math.max(gap, left)}px`;
+            tooltipPopup.style.top = `${Math.max(gap, top)}px`;
+        }
+
+        document.addEventListener('pointerover', event => {
+            const target = event.target.closest('[data-tooltip]');
+            const text = target ? target.getAttribute('data-tooltip').trim() : '';
+            if (!target || !text) {
+                hideTooltip();
+                return;
+            }
+            tooltipTarget = target;
+            tooltipPopup.replaceChildren();
+            const separatorIndex = text.indexOf(': ');
+            if (separatorIndex > 0) {
+                const title = document.createElement('strong');
+                title.className = 'tooltip-title';
+                title.textContent = text.substring(0, separatorIndex);
+                const description = document.createElement('span');
+                description.textContent = text.substring(separatorIndex + 2);
+                tooltipPopup.append(title, description);
+            } else {
+                tooltipPopup.textContent = text;
+            }
+            tooltipPopup.style.display = 'block';
+            positionTooltip(event);
+        });
+
+        document.addEventListener('pointermove', event => {
+            if (tooltipTarget) positionTooltip(event);
+        });
+
+        document.addEventListener('pointerout', event => {
+            if (tooltipTarget && !tooltipTarget.contains(event.relatedTarget)) hideTooltip();
+        });
 
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
@@ -766,7 +858,20 @@
         }
 
         function parseReport(reportText, timestamp = null) {
-            const lines = reportText.split('\n');
+            const lines = [];
+            const rawLines = reportText.split('\n');
+            for (let lineIndex = 0; lineIndex < rawLines.length; lineIndex++) {
+                const sourceLine = rawLines[lineIndex].trim();
+                if (!sourceLine) continue;
+
+                const nextLine = rawLines[lineIndex + 1] ? rawLines[lineIndex + 1].trim() : '';
+                if (sourceLine.endsWith(':') && /^(?:[\d.]+\s*(?:ms|mb)?|\{.*\})$/.test(nextLine)) {
+                    lines.push(`${sourceLine} ${nextLine}`);
+                    lineIndex++;
+                } else {
+                    lines.push(sourceLine);
+                }
+            }
             const data = { general: {}, stages: {}, transfer: {}, memory: {}, cache: {}, context: {}, concurrency: {} };
             if (timestamp) data.general['Date / Time'] = timestamp;
 
@@ -775,10 +880,7 @@
             let currentContextStage = '';
             let currentMemoryGrid = '';
 
-            for (const rawLine of lines) {
-                const sourceLine = rawLine.trim();
-                if (!sourceLine) continue;
-
+            for (const sourceLine of lines) {
                 // Server logs prefix each report line with a timestamp and " - "; plain reports do not.
                 const separatorIndex = sourceLine.indexOf(' - ');
                 const line = separatorIndex >= 0 ? sourceLine.substring(separatorIndex + 3).trim() : sourceLine;
@@ -791,6 +893,7 @@
                     data.general['Total Time'] = parseFloat(line.substring(line.indexOf(':') + 1));
                 } else if (line.startsWith('Content Generation:')) {
                     data.general['Content Generation'] = parseFloat(line.substring(line.indexOf(':') + 1));
+                    currentSection = data.stages;
                 } else if (line.startsWith('Access Initialization:')) {
                     data.stages['Access Initialization'] = parseFloat(line.substring(line.indexOf(':') + 1));
                     currentSection = data.stages;
@@ -811,16 +914,27 @@
                     if (match) currentSection[`${match[1]} Priority`] = `${match[2]} / ${match[3]} threads`;
                 } else if (/^.+\(Stage \d+\):\s*[\d.]+\s*ms$/.test(line)) {
                     const match = line.match(/^(.+\(Stage \d+\)):\s*([\d.]+)\s*ms$/);
-                    currentSection = data.stages;
-                    currentStage = match[1].trim();
-                    data.stages[currentStage] = parseFloat(match[2]);
+                    if (match) {
+                        currentSection = data.stages;
+                        currentStage = match[1].trim();
+                        data.stages[currentStage] = parseFloat(match[2]);
+                    }
                 } else if (currentSection === data.stages && /^(Preparation|Execution|Async Processes Start):/.test(line)) {
                     const match = line.match(/^(Preparation|Execution|Async Processes Start):\s*([\d.]+)\s*ms/);
                     if (match && currentStage) data.stages[`${currentStage} / ${match[1]}`] = parseFloat(match[2]);
+                } else if (currentSection === data.stages && /^.+:\s*[\d.]+\s*ms$/.test(line)) {
+                    const match = line.match(/^(.+):\s*([\d.]+)\s*ms$/);
+                    if (match) data.stages[match[1].trim()] = parseFloat(match[2]);
                 } else if (currentSection === data.context && /^.+\(Stage \d+\):$/.test(line)) {
                     currentContextStage = line.slice(0, -1).trim();
                 } else if (currentSection === data.context && currentContextStage && line.startsWith('Output Size')) {
                     const match = line.match(/^(Output Size \([^)]*\)):\s*(.+)$/);
+                    if (match) {
+                        if (!(currentContextStage in data.context)) data.context[currentContextStage] = null;
+                        data.context[`${currentContextStage} / ${match[1]}`] = match[2].trim();
+                    }
+                } else if (currentSection === data.context && currentContextStage && /^(Maximum Possible Output Size|Average Actual Output Size|Total Buffers Generated)/.test(line)) {
+                    const match = line.match(/^(.+):\s*(.+)$/);
                     if (match) {
                         if (!(currentContextStage in data.context)) data.context[currentContextStage] = null;
                         data.context[`${currentContextStage} / ${match[1]}`] = match[2].trim();
@@ -884,6 +998,10 @@
             'Thread': 'The thread handling generation for the world structure.',
             'Total Time': 'The overall average time taken for the entire chunk generation run.',
             'Content Generation': 'The total time spent on the core generation work, encompassing all stages and tile tasks.',
+            'Static Bounds Initialization': 'The one-time cost of calculating bounds fixed by the world structure.',
+            'Static Access Initialization': 'The cost of preparing access to data needed before per-chunk dynamic bounds are calculated.',
+            'Dynamic Bounds Initialization': 'The cost of calculating the context bounds required by Props and other stages. Its overhead depends on each Runtime node\'s Context Precision.',
+            'Dynamic Access Initialization': 'The cost of preparing data access for the dynamically calculated context bounds.',
             'Access Initialization': 'The time spent setting up memory access boundaries and initializing buffers for the chunk.',
             'Preparation': 'The time spent getting tasks ready for a specific generation stage, such as organizing positions and building worker task lists.',
             'Execution': 'The complete time taken to run a specific stage, including waiting for all asynchronous background tasks to finish.',
@@ -901,18 +1019,24 @@
             'Context Dependency Report': 'The total physical area, measured in grids or chunks, that the generator needs to read from or write to in order to output the requested chunk.',
             'Output Size (Buffer Column)': 'Dimensions (X and Z) in 8×8 block columns that a stage must generate to satisfy the dependency margins of all subsequent stages.',
             'Output Size (Chunk Column)': 'The stage\'s required dependency footprint converted into 32×32 block chunk units (Buffer Column size multiplied by 0.25).',
+            'Maximum Possible Output Size (Buffer Column)': 'The largest context footprint this stage can require, measured in 8×8 block columns. Large Prop reach and Runtime context sizes increase it.',
+            'Maximum Possible Output Size (Chunk Column)': 'The largest context footprint this stage can require, converted to 32×32 block chunk units.',
+            'Average Actual Output Size (Buffer Column)': 'The average context footprint actually generated for sampled chunks, measured in 8×8 block columns.',
+            'Average Actual Output Size (Chunk Column)': 'The average context footprint actually generated for sampled chunks, converted to 32×32 block chunk units.',
+            'Total Buffers Generated': 'The total number of buffer columns generated for this stage during the sampled reports.',
             'Total Requests': 'The number of times the generator looked for previously generated data.',
             'Missed Requests': 'The number of data requests that were missing and required fresh generation.',
             'Missed/Total Ratio': 'The percentage of data requests that required new generation rather than efficiently reusing previously cached data.',
             'BiomeStage (Stage 0)': 'Generates the 2D map of biome IDs for each column. Generally lightweight, but performance is impacted by Biome Map noise complexity and the total output area expanded by downstream transition margins.',
             'BiomeDistanceStage (Stage 1)': 'Scans neighboring columns to calculate distances to nearby biomes for blending. Performance is heavily impacted by search radius parameters (DefaultTransitionDistance, MaxBiomeEdgeDistance) and biome border frequency.',
             'TerrainStage (Stage 2)': 'Generates main terrain and assigns materials via density graphs and column depth analysis. Typically the largest CPU bottleneck; heavily impacted by 3D noises, multi-biome blending passes, and Material Provider evaluation.',
-            'PropStage': 'Impacted by Props. Reduce horizontal size, keep in lowest possible Runtimes.',
+            'PropStage': 'A stage that places Props. Each unique Runtime Index adds a Prop Stage; larger horizontal Prop reach increases the context required by earlier stages.',
             'TintStage (Stage 3)': 'Impacted by each Biome\'s Tint Provider.',
             'EnvironmentStage (Stage 4)': 'Impacted by each Biome\'s Environment Provider.',
         };
 
         function renderSection(cardId, currentData, prevData, tolerance, unit) {
+            hideTooltip();
             const card = document.getElementById(cardId);
             const list = card.querySelector('.stat-list');
             list.innerHTML = '';
@@ -948,8 +1072,14 @@
                 const tooltipKey = key.includes(' / ')
                     ? key.substring(key.lastIndexOf(' / ') + 3)
                     : key;
+                if (tooltipKey.startsWith('Output Size (')) {
+                    nameDiv.classList.add('deprecated-field');
+                }
                 if (DOC_TOOLTIPS[tooltipKey]) {
-                    nameDiv.setAttribute('data-tooltip', DOC_TOOLTIPS[tooltipKey]);
+                    const legacyNote = tooltipKey.startsWith('Output Size (')
+                        ? ' ⚠️ Legacy field: the original PropStage calculated buffer sizes globally at startup by iterating through every registered biome and prop. It accumulated all prop bounds into one global bounding box, then allocated buffers from that single build-time bound. As a result, a massive prop in one biome could expand memory and processing costs for every other biome and generated chunk, even when those props were not present. The new system calculates exact input and output bounds scoped strictly to the biomes and props present within a chunk\'s region using Runtime Context Precision. Additionally, it separates Maximum Possible Output Size from Average Actual Output Size'
+                        : '';
+                    row.setAttribute('data-tooltip', `${key}: ${DOC_TOOLTIPS[tooltipKey]}${legacyNote}`);
                     nameDiv.style.textDecoration = 'underline dotted #888';
                 }
 
