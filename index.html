@@ -35,6 +35,37 @@
             align-items: center;
             flex-wrap: wrap;
         }
+        .sample-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 5px 9px;
+            border: 1px solid #3c3c3c;
+            border-radius: 6px;
+            background: #252526;
+            color: #d4d4d4;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        .sample-filter input[type="checkbox"] {
+            width: 15px;
+            height: 15px;
+            margin: 0 2px 0 0;
+            accent-color: #4cca88;
+        }
+        .sample-filter input[type="number"] {
+            width: 54px;
+            padding: 3px 5px;
+            border: 1px solid #4a4a4a;
+            border-radius: 4px;
+            background: #1e1e1e;
+            color: #ffffff;
+            font: inherit;
+        }
+        .sample-filter input[type="number"]:focus {
+            outline: 1px solid #4cca88;
+            border-color: #4cca88;
+        }
         button {
             background-color: #0e639c;
             color: white;
@@ -316,9 +347,9 @@
         #historyIndicator {
             font-size: 14px;
             color: #a0a0a0;
-            margin: 0 10px;
+            margin: 0 8px;
             display: inline-block;
-            min-width: 170px;
+            min-width: 150px;
             text-align: center;
         }
 
@@ -438,14 +469,17 @@
 
     <h1>
         <div class="header-top">
-            <span>HytaleGenerator Performance Report Visualizer</span>
+            <span>Hytale Performance Report Visualizer</span>
             <div class="controls">
                 <a href="https://pre-release.docs.hytale.com/creating-content/world-generation/performance-optimization/" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Perf Docs ↗</a>
                 <a href="https://pre-release.docs.hytale.com/hytale-generator/prop-runtime/" target="_blank" style="color: #4cca88; text-decoration: none; font-size: 14px; margin-right: 5px; display: inline-block; vertical-align: middle;">Prop Runtime ↗</a>
                 <button onclick="document.getElementById('tipsDialog').showModal()" style="background-color: #4cca88; color: #1e1e1e; font-weight: bold; border-radius: 50%; width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; margin-right: 15px;" data-tooltip="Performance Tips">?</button>
-                <label style="font-size: 14px; display: flex; align-items: center; gap: 5px; cursor: pointer; margin-right: 10px;" data-tooltip="Only show reports with >= X Sample Count">
-                    <input type="checkbox" id="chkMinSamples" onchange="filterReports()"> &gt;= <input type="number" id="minSamplesValue" value="500" min="0" step="50" style="width: 50px; background: #252526; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 2px 4px;" onclick="event.stopPropagation()" onchange="if(document.getElementById('chkMinSamples').checked) filterReports()" onkeyup="if(document.getElementById('chkMinSamples').checked) filterReports()"> Samples
+                <label class="sample-filter" data-tooltip="Only show reports with >= X Sample Count">
+                    <input type="checkbox" id="chkMinSamples" onchange="filterReports()" aria-label="Enable minimum sample count filter"> &gt;=
+                    <input type="number" id="minSamplesValue" value="500" min="0" step="50" onclick="event.stopPropagation()" onchange="if(document.getElementById('chkMinSamples').checked) filterReports()" onkeyup="if(document.getElementById('chkMinSamples').checked) filterReports()" aria-label="Minimum sample count">
+                    <span>samples</span>
                 </label>
+                <button id="notificationToggle" type="button" aria-label="Enable notifications" aria-pressed="false" onclick="toggleNotifications()" data-tooltip="Notify when a new report passes the active filters">🔕</button>
                 <label for="worldstructureFilter" style="font-size: 14px; display: flex; align-items: center; gap: 5px; margin-right: 10px;">
                     Worldstructure
                     <select id="worldstructureFilter" onchange="filterReports()" disabled style="max-width: 180px; background: #252526; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 3px 4px;">
@@ -540,9 +574,46 @@
         let sources = [];
         let liveSource = null;
         let pollInterval = null;
+        let processingSources = false;
+        let notificationsEnabled = false;
         
         let allReports = [];
         let viewIndex = -1; // -1 means no data, allReports.length - 1 means latest
+
+        async function toggleNotifications() {
+            if (notificationsEnabled) {
+                notificationsEnabled = false;
+                updateNotificationToggle();
+                return;
+            }
+
+            if (!('Notification' in window)) {
+                window.alert('This browser does not support desktop notifications.');
+                return;
+            }
+
+            try {
+                if (Notification.permission === 'default') {
+                    await Notification.requestPermission();
+                }
+                if (Notification.permission !== 'granted') {
+                    window.alert('Notifications are blocked. Allow them for this site in your browser settings to enable alerts.');
+                    return;
+                }
+                notificationsEnabled = true;
+                updateNotificationToggle();
+            } catch (error) {
+                console.error('Error requesting notification permission:', error);
+                window.alert('Could not request notification permission. Check your browser settings and try again.');
+            }
+        }
+
+        function updateNotificationToggle() {
+            const button = document.getElementById('notificationToggle');
+            button.textContent = notificationsEnabled ? '🔔' : '🔕';
+            button.setAttribute('aria-label', notificationsEnabled ? 'Disable notifications' : 'Enable notifications');
+            button.setAttribute('aria-pressed', String(notificationsEnabled));
+        }
 
         // Tolerance for noise
         const NOISE_TOLERANCE_MS = 1.0; 
@@ -694,7 +765,7 @@
 
         function handleStaticFiles(files) {
             if (files.length === 0) return;
-            sources = files.map(file => ({ file, name: file.name, lastModified: 0, lastSize: 0, reports: [] }));
+            sources = files.map(file => ({ file, name: file.name, lastModified: 0, lastSize: 0, reports: [], hasProcessed: false }));
             liveSource = null;
             document.getElementById('status').innerText = sources.length === 1
                 ? `Viewing ${sources[0].name}`
@@ -705,7 +776,7 @@
         }
 
         function startLiveTracking(handles) {
-            sources = handles.map(handle => ({ handle, name: handle.name, lastModified: 0, lastSize: 0, reports: [] }));
+            sources = handles.map(handle => ({ handle, name: handle.name, lastModified: 0, lastSize: 0, reports: [], hasProcessed: false }));
             document.getElementById('status').innerText = sources.length === 1
                 ? `Tracking ${sources[0].name} live...`
                 : `Comparing ${sources.length} logs; tracking the newest file live`;
@@ -736,16 +807,26 @@
         }
 
         async function processSources(forceProcess = false) {
+            if (processingSources) return;
+            processingSources = true;
             try {
                 if (sources.length === 0) return;
                 const sourcesToRead = forceProcess || !liveSource ? sources : [liveSource];
+                const newlyParsedReports = [];
                 for (const source of sourcesToRead) {
                     const file = source.handle ? await source.handle.getFile() : source.file;
                     if (forceProcess || source.lastModified === 0 ||
                         file.lastModified > source.lastModified || file.size !== source.lastSize) {
+                        const wasProcessed = source.hasProcessed;
+                        const previousReportCount = source.reports.length;
+                        const parsedReports = parseLogText(await file.text(), source.name);
                         source.lastModified = file.lastModified;
                         source.lastSize = file.size;
-                        source.reports = parseLogText(await file.text(), source.name);
+                        source.reports = parsedReports;
+                        source.hasProcessed = true;
+                        if (!forceProcess && wasProcessed && parsedReports.length > previousReportCount) {
+                            newlyParsedReports.push(...parsedReports.slice(previousReportCount));
+                        }
                     }
                 }
 
@@ -753,9 +834,11 @@
                     liveSource = sources.reduce((latest, source) =>
                         !latest || source.lastModified > latest.lastModified ? source : latest, null);
                 }
-                rebuildReports();
+                rebuildReports(newlyParsedReports);
             } catch (error) {
                 console.error("Error reading file:", error);
+            } finally {
+                processingSources = false;
             }
         }
 
@@ -780,7 +863,7 @@
             return parsedReports;
         }
 
-        function rebuildReports() {
+        function rebuildReports(newlyParsedReports = []) {
             let newParsedReports = sources.flatMap(source => source.reports);
             newParsedReports.sort((left, right) => {
                 const leftDate = Date.parse((left.general['Date / Time'] || '').replaceAll('/', '-')) || 0;
@@ -790,11 +873,6 @@
 
             updateWorldstructureOptions(newParsedReports);
 
-            if (worldstructureFilter.value) {
-                newParsedReports = newParsedReports.filter(report =>
-                    report.general['WorldStructure Name'] === worldstructureFilter.value);
-            }
-
             if (newParsedReports.length === 0) {
                 showError(worldstructureFilter.value
                     ? `No reports found for worldstructure "${worldstructureFilter.value}".`
@@ -802,15 +880,7 @@
                 return;
             }
             
-            const minSamplesCheckbox = document.getElementById('chkMinSamples');
-            if (minSamplesCheckbox && minSamplesCheckbox.checked) {
-                const minValEl = document.getElementById('minSamplesValue');
-                const minVal = minValEl ? parseInt(minValEl.value) || 500 : 500;
-                newParsedReports = newParsedReports.filter(r => {
-                    const count = parseInt(r.general['Sample Count']);
-                    return !isNaN(count) && count >= minVal;
-                });
-            }
+            newParsedReports = newParsedReports.filter(reportPassesFilters);
 
             if (newParsedReports.length === 0) {
                 const minValEl = document.getElementById('minSamplesValue');
@@ -819,6 +889,7 @@
                 return;
             }
 
+            notifyForNewReports(newlyParsedReports.filter(reportPassesFilters));
             hideError();
 
             // If new reports came in, update the list 
@@ -835,6 +906,41 @@
 
             updateView();
             drawCharts();
+        }
+
+        function reportPassesFilters(report) {
+            if (worldstructureFilter.value &&
+                report.general['WorldStructure Name'] !== worldstructureFilter.value) {
+                return false;
+            }
+
+            const minSamplesCheckbox = document.getElementById('chkMinSamples');
+            if (minSamplesCheckbox && minSamplesCheckbox.checked) {
+                const minValEl = document.getElementById('minSamplesValue');
+                const minVal = minValEl ? parseInt(minValEl.value) || 500 : 500;
+                const count = parseInt(report.general['Sample Count']);
+                return !isNaN(count) && count >= minVal;
+            }
+            return true;
+        }
+
+        function notifyForNewReports(reports) {
+            if (!notificationsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+
+            for (const report of reports) {
+                const details = [];
+                if (report.general['Sample Count']) details.push(`${report.general['Sample Count']} samples`);
+                if (report.general['WorldStructure Name']) details.push(report.general['WorldStructure Name']);
+                if (report.general['Date / Time']) details.push(report.general['Date / Time']);
+                try {
+                    new Notification('New performance report', {
+                        body: details.join(' · ') || 'A new report matching your filters was detected.'
+                    });
+                } catch (error) {
+                    console.error('Error showing performance report notification:', error);
+                    break;
+                }
+            }
         }
 
         function filterReports() {
