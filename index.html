@@ -930,6 +930,7 @@
             for (const report of reports) {
                 const details = [];
                 if (report.general['Sample Count']) details.push(`${report.general['Sample Count']} samples`);
+                if (Number.isFinite(report.general['Total Time'])) details.push(`${report.general['Total Time']} ms total`);
                 if (report.general['WorldStructure Name']) details.push(report.general['WorldStructure Name']);
                 if (report.general['Date / Time']) details.push(report.general['Date / Time']);
                 try {
