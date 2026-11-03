@@ -476,7 +476,7 @@
                 <button onclick="document.getElementById('tipsDialog').showModal()" style="background-color: #4cca88; color: #1e1e1e; font-weight: bold; border-radius: 50%; width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; margin-right: 15px;" data-tooltip="Performance Tips">?</button>
                 <label class="sample-filter" data-tooltip="Only show reports with >= X Sample Count">
                     <input type="checkbox" id="chkMinSamples" onchange="filterReports()" aria-label="Enable minimum sample count filter"> &gt;=
-                    <input type="number" id="minSamplesValue" value="500" min="0" step="50" onclick="event.stopPropagation()" onchange="if(document.getElementById('chkMinSamples').checked) filterReports()" onkeyup="if(document.getElementById('chkMinSamples').checked) filterReports()" aria-label="Minimum sample count">
+                    <input type="number" id="minSamplesValue" value="500" min="0" step="50" onclick="event.stopPropagation()" oninput="if(document.getElementById('chkMinSamples').checked) filterReports(); else savePreferences()" aria-label="Minimum sample count">
                     <span>samples</span>
                 </label>
                 <button id="notificationToggle" type="button" aria-label="Enable notifications" aria-pressed="false" onclick="toggleNotifications()" data-tooltip="Notify when a new report passes the active filters">🔕</button>
@@ -576,14 +576,53 @@
         let pollInterval = null;
         let processingSources = false;
         let notificationsEnabled = false;
+        let activeNotification = null;
+        let notificationTimeout = null;
+        const PREFERENCES_STORAGE_KEY = 'hytalePerformanceReportVisualizerPreferences';
         
         let allReports = [];
         let viewIndex = -1; // -1 means no data, allReports.length - 1 means latest
 
+        function savePreferences() {
+            try {
+                localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({
+                    minSamplesEnabled: document.getElementById('chkMinSamples').checked,
+                    minSamplesValue: document.getElementById('minSamplesValue').value,
+                    notificationsEnabled
+                }));
+            } catch (error) {
+                console.error('Error saving preferences:', error);
+            }
+        }
+
+        function loadPreferences() {
+            try {
+                const storedPreferences = JSON.parse(localStorage.getItem(PREFERENCES_STORAGE_KEY) || '{}');
+                const saved = storedPreferences && typeof storedPreferences === 'object' ? storedPreferences : {};
+                const minSamplesCheckbox = document.getElementById('chkMinSamples');
+                const minSamplesValue = document.getElementById('minSamplesValue');
+                if (typeof saved.minSamplesEnabled === 'boolean') {
+                    minSamplesCheckbox.checked = saved.minSamplesEnabled;
+                }
+                if (typeof saved.minSamplesValue === 'string' && saved.minSamplesValue !== '') {
+                    const value = Number(saved.minSamplesValue);
+                    if (Number.isFinite(value) && value >= 0) minSamplesValue.value = saved.minSamplesValue;
+                }
+                notificationsEnabled = saved.notificationsEnabled === true &&
+                    'Notification' in window && Notification.permission === 'granted';
+                updateNotificationToggle();
+                if (saved.notificationsEnabled === true && !notificationsEnabled) savePreferences();
+            } catch (error) {
+                console.error('Error loading preferences:', error);
+            }
+        }
+
         async function toggleNotifications() {
             if (notificationsEnabled) {
                 notificationsEnabled = false;
+                closeActiveNotification();
                 updateNotificationToggle();
+                savePreferences();
                 return;
             }
 
@@ -602,6 +641,7 @@
                 }
                 notificationsEnabled = true;
                 updateNotificationToggle();
+                savePreferences();
             } catch (error) {
                 console.error('Error requesting notification permission:', error);
                 window.alert('Could not request notification permission. Check your browser settings and try again.');
@@ -613,6 +653,17 @@
             button.textContent = notificationsEnabled ? '🔔' : '🔕';
             button.setAttribute('aria-label', notificationsEnabled ? 'Disable notifications' : 'Enable notifications');
             button.setAttribute('aria-pressed', String(notificationsEnabled));
+        }
+
+        function closeActiveNotification() {
+            if (notificationTimeout !== null) {
+                clearTimeout(notificationTimeout);
+                notificationTimeout = null;
+            }
+            if (activeNotification) {
+                activeNotification.close();
+                activeNotification = null;
+            }
         }
 
         // Tolerance for noise
@@ -934,9 +985,18 @@
                 if (report.general['WorldStructure Name']) details.push(report.general['WorldStructure Name']);
                 if (report.general['Date / Time']) details.push(report.general['Date / Time']);
                 try {
-                    new Notification('New performance report', {
+                    closeActiveNotification();
+                    const notification = new Notification('New performance report', {
                         body: details.join(' · ') || 'A new report matching your filters was detected.'
                     });
+                    activeNotification = notification;
+                    notificationTimeout = setTimeout(() => {
+                        if (activeNotification === notification) {
+                            activeNotification = null;
+                            notificationTimeout = null;
+                            notification.close();
+                        }
+                    }, 8000);
                 } catch (error) {
                     console.error('Error showing performance report notification:', error);
                     break;
@@ -945,6 +1005,7 @@
         }
 
         function filterReports() {
+            savePreferences();
             if (sources.length > 0) {
                 processSources(true); // force re-process
             }
@@ -1514,6 +1575,7 @@
         }
         setupChartInteractivity('timeChart');
         setupChartInteractivity('memoryChart');
+        loadPreferences();
 
     </script>
 </body>
