@@ -694,7 +694,7 @@
 
         function handleStaticFiles(files) {
             if (files.length === 0) return;
-            sources = files.map(file => ({ file, name: file.name, lastModified: 0, reports: [] }));
+            sources = files.map(file => ({ file, name: file.name, lastModified: 0, lastSize: 0, reports: [] }));
             liveSource = null;
             document.getElementById('status').innerText = sources.length === 1
                 ? `Viewing ${sources[0].name}`
@@ -705,7 +705,7 @@
         }
 
         function startLiveTracking(handles) {
-            sources = handles.map(handle => ({ handle, name: handle.name, lastModified: 0, reports: [] }));
+            sources = handles.map(handle => ({ handle, name: handle.name, lastModified: 0, lastSize: 0, reports: [] }));
             document.getElementById('status').innerText = sources.length === 1
                 ? `Tracking ${sources[0].name} live...`
                 : `Comparing ${sources.length} logs; tracking the newest file live`;
@@ -741,8 +741,10 @@
                 const sourcesToRead = forceProcess || !liveSource ? sources : [liveSource];
                 for (const source of sourcesToRead) {
                     const file = source.handle ? await source.handle.getFile() : source.file;
-                    if (forceProcess || source.lastModified === 0 || file.lastModified > source.lastModified) {
+                    if (forceProcess || source.lastModified === 0 ||
+                        file.lastModified > source.lastModified || file.size !== source.lastSize) {
                         source.lastModified = file.lastModified;
+                        source.lastSize = file.size;
                         source.reports = parseLogText(await file.text(), source.name);
                     }
                 }
