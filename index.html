@@ -849,6 +849,7 @@
         }
 
         function startLiveTracking(handles, fallbackFiles = []) {
+            liveSource = null;
             sources = handles.map((handle, index) => ({
                 handle,
                 file: fallbackFiles[index],
