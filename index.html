@@ -814,17 +814,18 @@
             const fileItems = [...e.dataTransfer.items].filter(item => item.kind === 'file');
             if (fileItems.length === 0) return;
             const droppedFiles = [...(e.dataTransfer.files || [])];
+            const fallbackFiles = droppedFiles.length > 0
+                ? droppedFiles
+                : fileItems.map(item => item.getAsFile()).filter(Boolean);
 
             try {
                 if ('getAsFileSystemHandle' in fileItems[0]) {
-                    const handles = [];
-                    for (const item of fileItems) {
-                        const handle = await item.getAsFileSystemHandle();
+                    const handles = await Promise.all(fileItems.map(item => item.getAsFileSystemHandle()));
+                    for (const handle of handles) {
                         if (!handle || handle.kind !== 'file') throw new Error('File handle unavailable');
-                        handles.push(handle);
                     }
                     if (handles.length > 0) {
-                        startLiveTracking(handles);
+                        startLiveTracking(handles, fallbackFiles);
                         return;
                     }
                 }
@@ -832,9 +833,7 @@
                 console.warn("Falling back to static file drop.", err);
             }
 
-            handleStaticFiles(droppedFiles.length > 0
-                ? droppedFiles
-                : fileItems.map(item => item.getAsFile()).filter(Boolean));
+            handleStaticFiles(fallbackFiles);
         });
 
         function handleStaticFiles(files) {
@@ -849,8 +848,18 @@
             startPolling();
         }
 
-        function startLiveTracking(handles) {
-            sources = handles.map(handle => ({ handle, name: handle.name, lastModified: 0, lastSize: 0, reports: [], hasProcessed: false }));
+        function startLiveTracking(handles, fallbackFiles = []) {
+            sources = handles.map((handle, index) => ({
+                handle,
+                file: fallbackFiles[index],
+                name: handle.name,
+                lastModified: 0,
+                lastSize: 0,
+                reports: [],
+                hasProcessed: false,
+                liveReadFailed: false,
+                readErrorLogged: false
+            }));
             document.getElementById('status').innerText = sources.length === 1
                 ? `Tracking ${sources[0].name} live...`
                 : `Comparing ${sources.length} logs; tracking the newest file live`;
@@ -888,7 +897,20 @@
                 const sourcesToRead = forceProcess || !liveSource ? sources : [liveSource];
                 const newlyParsedReports = [];
                 for (const source of sourcesToRead) {
-                    const file = source.handle ? await source.handle.getFile() : source.file;
+                    let file = source.file;
+                    if (source.handle) {
+                        try {
+                            file = await source.handle.getFile();
+                            source.liveReadFailed = false;
+                        } catch (error) {
+                            if (!source.file) throw error;
+                            source.liveReadFailed = true;
+                            if (!source.readErrorLogged) {
+                                console.warn(`Could not read "${source.name}" through its live file handle; using the dropped snapshot and retrying.`, error);
+                                source.readErrorLogged = true;
+                            }
+                        }
+                    }
                     if (forceProcess || source.lastModified === 0 ||
                         file.lastModified !== source.lastModified || file.size !== source.lastSize) {
                         const wasProcessed = source.hasProcessed;
@@ -907,6 +929,16 @@
                 if (!liveSource) {
                     liveSource = sources.reduce((latest, source) =>
                         !latest || source.lastModified > latest.lastModified ? source : latest, null);
+                }
+                const failedLiveSources = sources.filter(source => source.liveReadFailed);
+                if (failedLiveSources.length > 0) {
+                    const names = failedLiveSources.map(source => source.name).join(', ');
+                    document.getElementById('status').innerText =
+                        `Showing dropped snapshot for ${names}; retrying live access...`;
+                } else if (sources.some(source => source.handle)) {
+                    document.getElementById('status').innerText = sources.length === 1
+                        ? `Tracking ${sources[0].name} live...`
+                        : `Comparing ${sources.length} logs; tracking the newest file live`;
                 }
                 rebuildReports(newlyParsedReports);
             } catch (error) {
